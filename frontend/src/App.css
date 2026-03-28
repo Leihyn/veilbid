@@ -1,0 +1,759 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #09090b;
+  --surface: #0f0f13;
+  --surface-2: #16161d;
+  --border: #1c1c27;
+  --border-hover: #2a2a3a;
+  --text: #ededf0;
+  --text-secondary: #a1a1aa;
+  --muted: #52525b;
+  --accent: #7c3aed;
+  --accent-hover: #8b5cf6;
+  --accent-glow: #7c3aed20;
+  --success: #10b981;
+  --success-bg: #10b98112;
+  --error: #ef4444;
+  --error-bg: #ef444412;
+  --warning: #f59e0b;
+  --warning-bg: #f59e0b12;
+  --cyan: #06b6d4;
+  --cyan-bg: #06b6d412;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 13px;
+}
+
+/* ========== Layout ========== */
+
+.app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px 48px;
+  min-height: 100vh;
+}
+
+/* ========== Header ========== */
+
+.header {
+  padding: 32px 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.logo h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--text), var(--text-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.tagline {
+  color: var(--muted);
+  font-size: 13px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.wallet-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.wallet-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+.network-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  border-radius: 4px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ========== Phase Stepper ========== */
+
+.phase-stepper {
+  display: flex;
+  align-items: center;
+  padding: 20px 0;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.phase-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.phase-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  border: 2px solid var(--border);
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+}
+
+.phase-step.completed .phase-number {
+  background: var(--success);
+  border-color: var(--success);
+  color: white;
+}
+
+.phase-step.active .phase-number {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.phase-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  transition: color 0.3s ease;
+}
+
+.phase-step.active .phase-label {
+  color: var(--text);
+}
+
+.phase-step.completed .phase-label {
+  color: var(--text-secondary);
+}
+
+.phase-connector {
+  width: 32px;
+  height: 2px;
+  background: var(--border);
+  margin: 0 6px;
+  flex-shrink: 0;
+  transition: background 0.3s ease;
+}
+
+.phase-connector.completed {
+  background: var(--success);
+}
+
+/* ========== Main Layout ========== */
+
+.main-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ========== Cards ========== */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 16px;
+  transition: border-color 0.2s ease;
+}
+
+.card:hover {
+  border-color: var(--border-hover);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.card-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+}
+
+/* ========== Connect Screen ========== */
+
+.connect-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+}
+
+.connect-screen h2 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 12px;
+}
+
+.connect-screen p {
+  color: var(--text-secondary);
+  max-width: 480px;
+  margin-bottom: 32px;
+  line-height: 1.7;
+}
+
+.connect-features {
+  display: flex;
+  gap: 32px;
+  margin-bottom: 40px;
+}
+
+.connect-feature {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.connect-feature-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+/* ========== Auction Info ========== */
+
+.auction-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.auction-stat {
+  padding: 14px 16px;
+  background: var(--bg);
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.auction-stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.auction-stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.auction-stat-value.small {
+  font-size: 13px;
+}
+
+.auction-stat.highlight {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.auction-stat.success-highlight {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+
+/* ========== Status Badge ========== */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-open { background: var(--success-bg); color: var(--success); }
+.status-closed { background: var(--warning-bg); color: var(--warning); }
+.status-resolving { background: var(--cyan-bg); color: var(--cyan); }
+.status-resolved { background: var(--accent-glow); color: var(--accent-hover); }
+.status-settled { background: var(--success-bg); color: var(--success); }
+.status-cancelled { background: var(--error-bg); color: var(--error); }
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ========== Bids Section ========== */
+
+.bids-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bid-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.bid-lock {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.bid-info {
+  flex: 1;
+}
+
+.bid-address {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.bid-encrypted {
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bid-cipher {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.bid-card.winner {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+
+.bid-card.winner .bid-lock {
+  background: var(--success-bg);
+}
+
+/* ========== Actions ========== */
+
+.action-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.btn {
+  padding: 12px 20px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.btn-success {
+  background: var(--success);
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #059669;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-connect {
+  padding: 14px 32px;
+  font-size: 15px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-connect:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 24px var(--accent-glow);
+}
+
+/* ========== Bid Input ========== */
+
+.bid-input-group {
+  display: flex;
+  gap: 8px;
+}
+
+.bid-input {
+  flex: 1;
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.bid-input:focus {
+  border-color: var(--accent);
+}
+
+.bid-input::placeholder {
+  color: var(--muted);
+}
+
+.bidder-select {
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  outline: none;
+  min-width: 140px;
+}
+
+/* ========== Settlement Result ========== */
+
+.settlement-result {
+  padding: 24px;
+  background: linear-gradient(135deg, var(--success-bg), transparent);
+  border: 1px solid var(--success);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.settlement-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--success);
+  margin: 8px 0;
+}
+
+.settlement-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.settlement-detail {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+/* ========== Compliance ========== */
+
+.compliance-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.compliance-tiers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.compliance-tier {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.compliance-tier-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.compliance-tier-label.public { color: var(--success); }
+.compliance-tier-label.restricted { color: var(--warning); }
+
+.compliance-tier-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.compliance-tier-desc {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.compliance-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--success-bg);
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ========== Loading ========== */
+
+.loading-bar {
+  padding: 10px 16px;
+  background: var(--accent-glow);
+  border: 1px solid #7c3aed30;
+  border-radius: 8px;
+  color: var(--accent-hover);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--accent-glow);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ========== Event Log ========== */
+
+.log-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.log-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+}
+
+.log-entries {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.log-entry {
+  padding: 8px 0;
+  border-bottom: 1px solid #ffffff06;
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.log-time {
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.log-msg {
+  color: var(--text-secondary);
+}
+
+.log-entry.success .log-msg { color: var(--success); }
+.log-entry.error .log-msg { color: var(--error); }
+
+/* ========== Empty State ========== */
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--muted);
+}
+
+.empty-state-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+/* ========== Countdown ========== */
+
+.countdown {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.countdown.expired {
+  color: var(--error);
+}
+
+/* ========== Responsive ========== */
+
+@media (max-width: 900px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+  .auction-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .connect-features {
+    flex-direction: column;
+    gap: 12px;
+  }
+}
