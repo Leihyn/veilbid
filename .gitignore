@@ -1,0 +1,8 @@
+node_modules/
+artifacts/
+cache/
+fhevmTemp/
+typechain-types/
+*.tsbuildinfo
+.env
+frontend/dist/
