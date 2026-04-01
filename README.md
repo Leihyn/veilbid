@@ -2,21 +2,49 @@
 
 **Confidential auction infrastructure for on-chain finance.**
 
-Every on-chain auction publishes its bids in plaintext. This breaks price discovery across all of finance.
+**[Live Demo](https://veilbid-app.vercel.app)** | **[Sepolia Contract](https://sepolia.etherscan.io/address/0x0F4DAe0DfCCF5Ed79b63Dd662Aa25F3150f5cb75)**
 
-The US Treasury sells **$2 trillion** in bonds every year through sealed-bid auctions. Google sells **$200 billion** in ad placements through sealed-bid auctions. Spectrum licenses, IPO allocations, carbon credit markets, real estate foreclosures, government procurement. Sealed-bid auctions are the backbone of serious finance. They all depend on one guarantee: nobody sees anyone else's bid.
+---
 
-On a transparent blockchain, this guarantee doesn't exist. Every bid is visible in calldata. Competitors adjust. MEV bots extract value. Rational participants shade below their true valuation or don't show up at all. The result: on-chain auctions produce worse prices for sellers, worse outcomes for bidders, and exclude institutions entirely.
+March 2020. MakerDAO's liquidation auctions are visible on-chain. Liquidation bots see each other's bids, coordinate, and bid $0. They walk away with **$8.3 million** in collateral for free. Nobody cheated. The system worked exactly as designed. The design was the problem.
 
-VeilBid fixes this at the infrastructure layer. Bid prices are encrypted client-side using Fully Homomorphic Encryption and submitted as ciphertext. The smart contract finds the winner and settlement price by computing directly on encrypted data, without ever decrypting individual bids. The winner pays the second-highest price (Vickrey mechanism), making honest bidding the dominant strategy. Regulators get selective decryption access on demand.
+Every on-chain auction publishes bids in plaintext calldata. Competitors see your price. MEV bots front-run your transaction. Rational participants shade below their true valuation because overpaying hurts more than losing. Sellers get worse prices. Bidders get worse outcomes. Institutions don't show up at all.
+
+VeilBid fixes this. Bid prices are encrypted client-side using Fully Homomorphic Encryption and submitted as ciphertext. The smart contract finds the winner and settlement price by computing directly on encrypted data, without ever decrypting individual bids. The winner pays the second-highest price (Vickrey mechanism), making honest bidding the dominant strategy. Regulators get selective decryption access on demand.
 
 **27 passing tests. Deployed on Ethereum Sepolia with real client-side FHE encryption. 14 fhEVM primitives in a single contract.**
 
 Built on [Zama's fhEVM](https://docs.zama.ai/fhevm).
 
-## Who Builds on VeilBid
+## About
 
-VeilBid is a protocol primitive. Other applications integrate it the same way they'd integrate a DEX or lending pool.
+Built by **faruukku**. I watched the MakerDAO Black Thursday postmortem and couldn't shake the fact that $8.3 million vanished not because of an exploit, but because the auction was transparent by default. That's a design failure, not a security failure — and it means every on-chain auction running today has the same vulnerability baked in. I built VeilBid because I believe privacy isn't a feature you bolt on after the fact; it's infrastructure. FHE lets us keep the verifiability of public blockchains while giving bidders the confidentiality they need to bid honestly. If DeFi wants institutional capital, it needs to stop broadcasting everyone's strategy to the world.
+
+## What We Built
+
+VeilBid is a complete sealed-bid Vickrey auction running entirely on-chain with FHE. This is not a toy demo — it handles the full auction lifecycle:
+
+- **Client-side encryption** — TFHE WebAssembly encrypts bids in the browser. The plaintext price never touches the network.
+- **Two-pass FHE resolution** — A tournament bracket finds the winner and second price using 14 homomorphic operations. Zero values decrypted.
+- **Vickrey settlement** — Winner pays the second-highest price. Their actual bid stays encrypted forever.
+- **Graduated disclosure** — Two-tier compliance model. The market sees the settlement price. Regulators get selective access to winning bids.
+- **Production frontend** — React app with MetaMask integration, real-time auction lifecycle, and live Sepolia deployment.
+
+## The Problem Is Proven
+
+These aren't hypothetical risks. They've happened, they're documented, and they cost real money.
+
+### Liquidation Auctions
+
+When lending protocols liquidate undercollateralized positions, visible bids enable collusion. On MakerDAO's Black Thursday, liquidation bots saw each other's bids and coordinated to bid $0, taking $8.3M in collateral for free. Aave, Compound, and every lending protocol with on-chain liquidation faces the same vulnerability. Confidential liquidation auctions make coordination impossible — you can't match a bid you can't see.
+
+### OTC Block Trades
+
+A fund holds $50M in tokens. On a DEX, slippage makes execution impossible. On an OTC desk, information leaks. Cumberland, Genesis, and Jump have all faced information leakage scandals where desk traders front-ran client orders. VeilBid replaces the trusted intermediary: seller locks tokens, bidders submit encrypted offers, best price wins. No intermediary sees the bids. No information leaks.
+
+### Token Launch Price Discovery
+
+In standard IDOs, whales see retail bids in the mempool and manipulate. Early bidders reveal price information to later participants. The result is always the same: insiders extract value, retail gets worse fills. VeilBid creates a level playing field — every participant bids blindly, the clearing price reflects genuine demand.
 
 ```solidity
 // Any protocol can create a confidential auction in one call
@@ -30,38 +58,6 @@ auction.createAuction(
     minBidders    // minimum participation
 );
 ```
-
-### Government Bond Auctions
-
-The US Treasury, UK DMO, and Japanese MOF sell trillions in sovereign debt through sealed-bid auctions every year. As government bonds move on-chain (tokenized Treasuries are already a $2B+ market via Ondo, Franklin Templeton, BlackRock BUIDL), the issuance mechanism needs to follow. VeilBid provides the sealed-bid guarantee these markets require.
-
-### Institutional OTC Block Trades
-
-A fund holds $50M in tokens. On a DEX, slippage makes it impossible. On an OTC desk, information leaks to traders who front-run the deal. Cumberland, Genesis, and Jump have all faced information leakage scandals. VeilBid is a trustless OTC venue: seller locks tokens, bidders submit encrypted offers, best price wins. No intermediary sees the bids.
-
-### Real Estate and RWA Auctions
-
-The global real estate auction market exceeds $300B annually. Tokenized real-world assets (real estate, art, carbon credits, commodity forwards) are moving on-chain. Traditional auctions suffer from shill bidding and bid rigging. The Vickrey mechanism makes shill bidding irrational: bidding above your true value can only hurt you (you overpay), and bidding below can only hurt you (you lose). FHE makes it enforceable on-chain.
-
-### Carbon Credit Markets
-
-Compliance carbon markets (EU ETS, California Cap-and-Trade) trade $900B+ annually. Auction-based allocation is standard. Companies bid for emission allowances, and bid strategies reveal competitive positioning and production forecasts. Confidential bidding protects commercially sensitive information while maintaining market integrity.
-
-### Spectrum and License Auctions
-
-Telecom spectrum auctions generate $100B+ globally. The FCC's combinatorial clock auction uses sealed bids for a reason: visible bids enable tacit collusion. As spectrum rights tokenize, on-chain sealed-bid infrastructure becomes necessary.
-
-### IPO and Token Launch Price Discovery
-
-A project wants fair price discovery for a new token or equity offering. In standard IDOs, whales see retail bids and manipulate. In traditional IPO bookbuilding, the underwriter sees all orders (information asymmetry). VeilBid creates a level playing field: every participant bids blindly, the clearing price reflects genuine demand.
-
-### Protocol-Owned Liquidity Sales
-
-DeFi protocols selling POL positions, protocol fees, or reserve assets need to do so without signaling distress or intent to the market. A confidential auction lets protocols manage treasury operations without creating trading signals.
-
-### Liquidation Auctions
-
-When lending protocols liquidate undercollateralized positions, visible liquidation bids enable collusion. On MakerDAO's Black Thursday (March 2020), liquidation bots saw each other's bids and coordinated to bid $0, walking away with $8.3M in collateral for free. Confidential liquidation auctions prevent this coordination.
 
 ## How It Works
 
@@ -84,7 +80,7 @@ When lending protocols liquidate undercollateralized positions, visible liquidat
    - **Second tournament**: N-1 comparisons on adjusted bids find the second-highest price
    - **Winner ID**: `FHE.eq` pass marks the winner, made publicly decryptable
 
-**6. Settle**: Contract verifies the winner and settlement price via `FHE.eq`. Winner receives tokens and pays `secondPrice * quantity`. All losers get full deposits back instantly.
+**6. Settle**: Winner flags (`isWinner` per bid) are stored on-chain and publicly decryptable. Off-chain reads the flags to identify the winner index, then reads the decryptable settlement price. Contract verifies both via `FHE.eq`. Winner receives tokens and pays `secondPrice * quantity`. All losers get full deposits back instantly.
 
 ## Why Vickrey + FHE
 
@@ -213,7 +209,7 @@ scripts/
 
 frontend/
   src/App.jsx          React UI with MetaMask + client-side FHE encryption
-  src/App.css          VeilBid interface (Inter + JetBrains Mono, dark theme)
+  src/App.css          VeilBid interface (dark theme)
 
 test/
   SealedAuction.ts     27 tests: full lifecycle, ties, cancellation, compliance
@@ -225,11 +221,13 @@ Live on Ethereum Sepolia with real client-side FHE encryption:
 
 | Contract | Address |
 |---|---|
-| SealedAuction | [`0xe811BB16011d730FF663349B6fA81041605755F2`](https://sepolia.etherscan.io/address/0xe811BB16011d730FF663349B6fA81041605755F2) |
-| BidToken (cUSDC) | [`0xaA14364aDc5A7BCCfd464d608B77b684cb75949C`](https://sepolia.etherscan.io/address/0xaA14364aDc5A7BCCfd464d608B77b684cb75949C) |
-| SellToken (GOV) | [`0xe7E2F0688E4C96C03d49F65A97A69a9C954e75B2`](https://sepolia.etherscan.io/address/0xe7E2F0688E4C96C03d49F65A97A69a9C954e75B2) |
+| SealedAuction | [`0x0F4DAe0DfCCF5Ed79b63Dd662Aa25F3150f5cb75`](https://sepolia.etherscan.io/address/0x0F4DAe0DfCCF5Ed79b63Dd662Aa25F3150f5cb75) |
+| BidToken (cUSDC) | [`0x884fd7ea6F8598Df1A87D753Bb291D451AEA6726`](https://sepolia.etherscan.io/address/0x884fd7ea6F8598Df1A87D753Bb291D451AEA6726) |
+| SellToken (GOV) | [`0x327044131Ee5668C4975f68E96bA20BF2B14ca57`](https://sepolia.etherscan.io/address/0x327044131Ee5668C4975f68E96bA20BF2B14ca57) |
 
 You can verify on Etherscan that bid transactions contain only encrypted bytes in calldata. No plaintext prices.
+
+**[Try the live frontend](https://veilbid-app.vercel.app)** — connect MetaMask on Sepolia, create an auction, and submit encrypted bids.
 
 ## Privacy Model
 
