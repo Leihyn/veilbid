@@ -71,6 +71,9 @@ contract SealedAuction is ZamaEthereumConfig {
     // Temporary storage for split resolution
     mapping(uint256 => euint64[]) internal adjustedBids;
 
+    // Winner flags: isWinner[auctionId][bidIndex] — publicly decryptable after resolvePass2
+    mapping(uint256 => mapping(uint256 => ebool)) public winnerFlags;
+
     // =========== Events ===========
 
     event AuctionCreated(uint256 indexed auctionId, address indexed seller, uint64 sellAmount, uint64 maxPrice, uint64 reservePrice, uint256 deadline);
@@ -317,6 +320,8 @@ contract SealedAuction is ZamaEthereumConfig {
             ebool isWinner = FHE.and(isMatch, FHE.not(foundWinner));
             foundWinner = FHE.or(foundWinner, isWinner);
 
+            // Store winner flag in storage so it can be queried off-chain
+            winnerFlags[auctionId][i] = isWinner;
             FHE.allowThis(isWinner);
             FHE.makePubliclyDecryptable(isWinner);
         }
@@ -510,5 +515,16 @@ contract SealedAuction is ZamaEthereumConfig {
             "SealedAuction: not fully resolved"
         );
         return auctions[auctionId].settlementPrice;
+    }
+
+    /// @notice Get the winner flag for a specific bid (publicly decryptable after resolvePass2)
+    ///         Off-chain: decrypt each flag to find winner index. On fhEVM, use the gateway.
+    ///         On mock, use static calls with FHE.eq verification.
+    function getWinnerFlag(uint256 auctionId, uint256 bidIndex) external view returns (ebool) {
+        require(
+            auctions[auctionId].state >= AuctionState.Resolved,
+            "SealedAuction: not resolved"
+        );
+        return winnerFlags[auctionId][bidIndex];
     }
 }
