@@ -30,7 +30,7 @@ async function main() {
   console.log("");
 
   // Get contract instances
-  const bidToken = await ethers.getContractAt("MockERC20", ADDRESSES.bidToken);
+  const bidToken = await ethers.getContractAt("VeilBidUSDC", ADDRESSES.bidToken);
   const sellToken = await ethers.getContractAt("MockERC20", ADDRESSES.sellToken);
   const auction = await ethers.getContractAt("SealedAuction", ADDRESSES.auction);
 
@@ -124,31 +124,32 @@ async function main() {
   }
   console.log("");
 
-  // Mint MockUSDC to bidders (skip if already have enough)
-  console.log("=== Minting USDC to Bidders ===");
+  // Mint vbUSDC (ERC-7984 confidential token) to bidders
+  console.log("=== Minting vbUSDC (ERC-7984) to Bidders ===");
   for (const b of bidders) {
-    const usdcBal = await bidToken.balanceOf(b.wallet.address);
-    if (usdcBal >= fixedDeposit) {
-      console.log(`${b.name} already has ${usdcBal} USDC — skipping`);
+    // ERC-7984 balances are encrypted — use balanceIndicator as a "minted at all?" signal
+    const indicator = Number(await bidToken.balanceIndicator?.(b.wallet.address) ?? 0);
+    if (indicator > 0) {
+      console.log(`${b.name} already has vbUSDC (encrypted balance) — skipping`);
       continue;
     }
     const tx = await bidToken.connect(deployer).mint(b.wallet.address, fixedDeposit);
     await tx.wait();
-    console.log(`Minted ${fixedDeposit} USDC to ${b.name}`);
+    console.log(`Minted ${fixedDeposit} vbUSDC to ${b.name} (balance encrypted)`);
   }
   console.log("");
 
-  // Approve auction contract from each bidder (skip if already approved)
-  console.log("=== Approving Auction Contract ===");
+  // ERC-7984 setOperator — replaces ERC-20 approve. The auction can pull
+  // bidder funds via confidentialTransferFrom only if it's an authorized operator.
+  console.log("=== Authorizing Auction as ERC-7984 Operator ===");
   for (const b of bidders) {
-    const allowance = await bidToken.allowance(b.wallet.address, ADDRESSES.auction);
-    if (allowance >= fixedDeposit) {
-      console.log(`${b.name} already approved — skipping`);
+    if (await bidToken.isOperator(b.wallet.address, ADDRESSES.auction)) {
+      console.log(`${b.name} already authorized — skipping`);
       continue;
     }
-    const tx = await bidToken.connect(b.wallet).approve(ADDRESSES.auction, fixedDeposit);
+    const tx = await bidToken.connect(b.wallet).setOperator(ADDRESSES.auction, 2_000_000_000);
     await tx.wait();
-    console.log(`${b.name} approved auction for ${fixedDeposit} USDC`);
+    console.log(`${b.name} authorized auction as operator`);
   }
   console.log("");
 

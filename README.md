@@ -12,9 +12,9 @@ Every on-chain auction publishes bids in plaintext calldata. Competitors see you
 
 VeilBid fixes this. Bid prices are encrypted client-side using Fully Homomorphic Encryption and submitted as ciphertext. The smart contract finds the winner and settlement price by computing directly on encrypted data, without ever decrypting individual bids. The winner pays the second-highest price (Vickrey mechanism), making honest bidding the dominant strategy. Regulators get selective decryption access on demand.
 
-**27 passing tests. Deployed on Ethereum Sepolia with real client-side FHE encryption. 14 fhEVM primitives in a single contract.**
+**27 passing tests. Deployed on Ethereum Sepolia. Confidential bid token built on OpenZeppelin's audited [ERC-7984](https://github.com/OpenZeppelin/openzeppelin-confidential-contracts) reference implementation — bidder balances stay encrypted on-chain, even across multiple auctions.**
 
-Built on [Zama's fhEVM](https://docs.zama.ai/fhevm).
+Built on [Zama's fhEVM](https://docs.zama.org/protocol).
 
 ## About
 
@@ -24,11 +24,12 @@ Built by **faruukku**. I watched the MakerDAO Black Thursday postmortem and coul
 
 VeilBid is a complete sealed-bid Vickrey auction running entirely on-chain with FHE. This is not a toy demo — it handles the full auction lifecycle:
 
-- **Client-side encryption** — TFHE WebAssembly encrypts bids in the browser. The plaintext price never touches the network.
-- **Two-pass FHE resolution** — A tournament bracket finds the winner and second price using 14 homomorphic operations. Zero values decrypted.
-- **Vickrey settlement** — Winner pays the second-highest price. Their actual bid stays encrypted forever.
-- **Graduated disclosure** — Two-tier compliance model. The market sees the settlement price. Regulators get selective access to winning bids.
-- **Production frontend** — React app with MetaMask integration, real-time auction lifecycle, and live Sepolia deployment.
+- **Client-side bid encryption** — TFHE WebAssembly encrypts bids in the browser. The plaintext price never touches the network.
+- **Two-pass FHE resolution with integrity proof** — A tournament bracket finds the winner and second price; settlement re-checks both against the encrypted state via `FHE.eq` (publicly decryptable). Zero individual bids revealed.
+- **Vickrey settlement** — Winner pays the second-highest price, making honest bidding incentive-compatible (mechanism design literature, since Vickrey 1961). Winner's actual bid stays encrypted forever.
+- **ERC-7984 confidential bid token** — Deposits, payouts, and refunds flow through OpenZeppelin's audited confidential token reference implementation. A bidder's cumulative auction exposure is private even across many auctions; observers see ciphertext handles, never amounts.
+- **Graduated regulator disclosure** — The market sees the settlement price. Regulators get selective access to the winning bid via on-chain authorization, replicating the disclosure regime that makes regulated TradFi sealed-bid auctions possible.
+- **Production frontend** — React app with MetaMask integration, real-time auction lifecycle, live Sepolia deployment.
 
 ## The Problem Is Proven
 
@@ -138,6 +139,27 @@ auction.revealForCompliance(auctionId, regulatorAddress);
 
 This maps directly to real-world regulatory requirements: institutions need audit trails, regulators need oversight, but neither requires broadcasting every participant's strategy to the world.
 
+## ERC-7984: Confidential bid token
+
+The bid token is `VeilBidUSDC`, a thin extension of OpenZeppelin's audited [ERC-7984](https://github.com/OpenZeppelin/openzeppelin-confidential-contracts) reference implementation (`v0.4.0`, March 2026). Bidder balances are stored as `euint64`, transfers happen on ciphertext, and approvals use the operator pattern instead of ERC-20 allowances (which would leak balance information through gas patterns when an allowance is partially consumed).
+
+```solidity
+import {ERC7984} from "@openzeppelin/confidential-contracts/token/ERC7984/ERC7984.sol";
+
+contract VeilBidUSDC is ZamaEthereumConfig, ERC7984 {
+    constructor() ERC7984("VeilBid USDC", "vbUSDC", "") {}
+    function mint(address to, uint64 amount) external {
+        euint64 enc = FHE.asEuint64(amount);
+        FHE.allowThis(enc);
+        _mint(to, enc);
+    }
+}
+```
+
+**Why this matters.** Encrypting bid prices alone is insufficient. If a bidder's plaintext deposit is `maxPrice * sellAmount`, an observer can correlate addresses with auction participation across many auctions and reconstruct cumulative exposure. ERC-7984 closes that gap: deposits, payouts, and refunds all flow through encrypted balances. A bidder's lifetime VeilBid activity stays private.
+
+**Operator pattern.** Bidders authorize the auction once via `bidToken.setOperator(auction, until)`. The auction calls `confidentialTransferFrom(bidder, auction, encAmount)` to pull the deposit. There is no leaky `allowance(holder, spender)` getter — observers cannot see how much spending authority a bidder has granted.
+
 ## What Makes This Hard
 
 Most fhEVM projects use 2-3 FHE operations. VeilBid uses **14 distinct primitives** in a single contract:
@@ -199,12 +221,14 @@ Most fhEVM projects use 2-3 FHE operations. VeilBid uses **14 distinct primitive
 
 ```
 contracts/
-  SealedAuction.sol    Vickrey auction with two-pass FHE resolution (460 lines)
-  MockERC20.sol        Standard ERC-20 for deposits and sell tokens
+  SealedAuction.sol    Vickrey auction with two-pass FHE resolution (~530 lines)
+  VeilBidUSDC.sol      ERC-7984 confidential bid token (extends OZ reference impl)
+  MockERC20.sol        Standard ERC-20 for the sell token (the public asset on auction)
   DemoHelper.sol       On-chain encryption helper (local development only)
 
 scripts/
-  deploy.ts            Deploy to Hardhat or Sepolia (auto-writes frontend addresses)
+  deploy.ts            Deploy to Hardhat / Sepolia / mainnet (auto-writes frontend addresses)
+  seed-auction.ts      One-command judge walkthrough: 5 ephemeral bidders, encrypted bids
   submit-bids.ts       CLI: generate wallets, encrypt bids client-side, submit to testnet
 
 frontend/
@@ -212,20 +236,14 @@ frontend/
   src/App.css          VeilBid interface (dark theme)
 
 test/
-  SealedAuction.ts     27 tests: full lifecycle, ties, cancellation, compliance
+  SealedAuction.ts     27 tests: full lifecycle, ties, cancellation, compliance, ERC-7984 flows
 ```
 
 ## Testnet Deployment
 
-Live on Ethereum Sepolia with real client-side FHE encryption:
+Live on Ethereum Sepolia with real client-side FHE encryption and ERC-7984 confidential balances. Addresses are written to `frontend/src/contracts/addresses.js` by `scripts/deploy.ts` — see that file for the current set after a fresh deploy.
 
-| Contract | Address |
-|---|---|
-| SealedAuction | [`0x0F4DAe0DfCCF5Ed79b63Dd662Aa25F3150f5cb75`](https://sepolia.etherscan.io/address/0x0F4DAe0DfCCF5Ed79b63Dd662Aa25F3150f5cb75) |
-| BidToken (cUSDC) | [`0x884fd7ea6F8598Df1A87D753Bb291D451AEA6726`](https://sepolia.etherscan.io/address/0x884fd7ea6F8598Df1A87D753Bb291D451AEA6726) |
-| SellToken (GOV) | [`0x327044131Ee5668C4975f68E96bA20BF2B14ca57`](https://sepolia.etherscan.io/address/0x327044131Ee5668C4975f68E96bA20BF2B14ca57) |
-
-You can verify on Etherscan that bid transactions contain only encrypted bytes in calldata. No plaintext prices.
+You can verify on Etherscan that bid transactions contain only encrypted bytes in calldata, and that vbUSDC balances expose only ciphertext handles, not amounts.
 
 **[Try the live frontend](https://veilbid-app.vercel.app)** — connect MetaMask on Sepolia, create an auction, and submit encrypted bids.
 
@@ -263,15 +281,15 @@ Total resolve cost for 5 bidders: 1.59M gas across two transactions. Estimated p
 # Install and run tests (local Hardhat with fhEVM mock)
 npm install
 npx hardhat compile
-npx hardhat test
+npx hardhat test          # 27 passing — full Vickrey + ERC-7984 lifecycle
 
 # Deploy to Sepolia
-cp .env.example .env
-# Add your DEPLOYER_PRIVATE_KEY to .env
+cp .env.example .env      # add DEPLOYER_PRIVATE_KEY
 npx hardhat run scripts/deploy.ts --network sepolia
 
-# Submit encrypted bids via CLI
-npx hardhat run scripts/submit-bids.ts --network sepolia
+# One-command judge walkthrough — creates auction, funds 5 bidders,
+# sets ERC-7984 operator, submits 5 encrypted bids
+npx hardhat run scripts/seed-auction.ts --network sepolia
 
 # Run the frontend
 cd frontend && npm install && npm run dev
@@ -293,8 +311,9 @@ The second-highest bid is below the seller's reserve. The auction fails. Bidders
 
 ## Built With
 
-- [Zama fhEVM](https://docs.zama.ai/fhevm) / [@fhevm/solidity v0.11.1](https://www.npmjs.com/package/@fhevm/solidity)
+- [Zama fhEVM](https://docs.zama.org/protocol) / [@fhevm/solidity v0.11.1](https://www.npmjs.com/package/@fhevm/solidity)
 - [@zama-fhe/relayer-sdk v0.4.1](https://www.npmjs.com/package/@zama-fhe/relayer-sdk) (TFHE WASM + ZK proof generation)
+- [@openzeppelin/confidential-contracts v0.4.0](https://github.com/OpenZeppelin/openzeppelin-confidential-contracts) (ERC-7984 reference implementation)
 - [Hardhat](https://hardhat.org/) + [@fhevm/hardhat-plugin](https://www.npmjs.com/package/@fhevm/hardhat-plugin)
 - React 19, Vite 8, ethers 6
 - Ethereum Sepolia testnet
