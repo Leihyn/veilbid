@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.27;
 
 import {FHE, euint64, ebool, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
+import {IERC7984} from "@openzeppelin/confidential-contracts/interfaces/IERC7984.sol";
 import {MockERC20} from "./MockERC20.sol";
 
 /// @title SealedAuction — On-chain Vickrey (second-price sealed-bid) auction on fhEVM
@@ -11,9 +12,15 @@ import {MockERC20} from "./MockERC20.sol";
 /// and never revealed on-chain. The contract finds the winner and settlement price via two
 /// FHE tournament passes without decrypting any individual bid.
 ///
-/// Deposits are plaintext ERC-20 (fixed amount per bidder) to guarantee solvency.
-/// The settlement price becomes public after settlement — this is by design.
-/// The winning bid stays encrypted unless the winner grants compliance access.
+/// The bid token is an OpenZeppelin ERC-7984 confidential token: deposits, payouts, and
+/// refunds flow through encrypted balances so a bidder's cumulative auction exposure
+/// stays private even across many auctions. The sell token remains a standard ERC-20
+/// (the asset being auctioned is typically a public token).
+///
+/// The settlement price becomes public after settlement — this is by design (the market
+/// must observe the clearing price). The winning bid stays encrypted unless the winner
+/// grants compliance access. Bidders authorize the auction as a bid-token operator
+/// (ERC-7984 operator pattern, replacing ERC-20 allowances which would leak balances).
 ///
 /// Game theory mitigations: reserve price (anti-shill), minimum bidder count (anti-collusion),
 /// one bid per address (anti-spam), fixed deposits (expensive to create shill accounts).
@@ -34,11 +41,11 @@ contract SealedAuction is ZamaEthereumConfig {
         // Configuration (set at creation)
         address seller;
         MockERC20 sellToken;
-        MockERC20 bidToken;
+        IERC7984 bidToken;       // ERC-7984 confidential token — deposits flow through encrypted balances
         uint64 sellAmount;       // Plaintext — how many tokens for sale
         uint64 maxPrice;         // Plaintext — maximum bid per unit
         uint64 reservePrice;     // Plaintext — minimum acceptable second price per unit
-        uint256 fixedDeposit;    // maxPrice * sellAmount — same for all bidders
+        uint64 fixedDeposit;     // maxPrice * sellAmount — same for all bidders (uint64 for ERC-7984)
         uint256 deadline;
         uint256 minBidders;      // Minimum participation for valid auction
 
@@ -98,7 +105,7 @@ contract SealedAuction is ZamaEthereumConfig {
     /// @param minBidders Minimum number of bidders for the auction to resolve (recommend >= 3)
     function createAuction(
         MockERC20 sellToken,
-        MockERC20 bidToken,
+        IERC7984 bidToken,
         uint64 sellAmount,
         uint64 maxPrice,
         uint64 reservePrice,
@@ -111,7 +118,10 @@ contract SealedAuction is ZamaEthereumConfig {
         require(reservePrice <= maxPrice, "SealedAuction: reserve > max");
         require(minBidders >= 2, "SealedAuction: minBidders must be >= 2");
 
-        uint256 fixedDeposit = uint256(maxPrice) * uint256(sellAmount);
+        // ERC-7984 amounts cap at uint64 — keep fixedDeposit within range
+        uint256 fixedDeposit256 = uint256(maxPrice) * uint256(sellAmount);
+        require(fixedDeposit256 <= type(uint64).max, "SealedAuction: deposit overflow");
+        uint64 fixedDeposit = uint64(fixedDeposit256);
 
         // Lock sell tokens in the contract (reverts on insufficient balance/allowance)
         sellToken.transferFrom(msg.sender, address(this), sellAmount);
@@ -149,8 +159,11 @@ contract SealedAuction is ZamaEthereumConfig {
         require(msg.sender != a.seller, "SealedAuction: seller cannot bid");
         require(!hasBid[auctionId][msg.sender], "SealedAuction: already bid");
 
-        // Take plaintext deposit — reverts on insufficient balance/allowance
-        a.bidToken.transferFrom(msg.sender, address(this), a.fixedDeposit);
+        // Take encrypted deposit via ERC-7984 confidential transfer.
+        // Bidder must have called bidToken.setOperator(this, until) beforehand.
+        // The deposit amount is publicly known (fixedDeposit) but flows through
+        // encrypted balances — the bidder's overall balance stays private.
+        _takeDeposit(a.bidToken, msg.sender, a.fixedDeposit);
 
         // Process encrypted price
         euint64 price = FHE.fromExternal(encPrice, priceProof);
@@ -189,8 +202,8 @@ contract SealedAuction is ZamaEthereumConfig {
         require(bidder != a.seller, "SealedAuction: seller cannot bid");
         require(!hasBid[auctionId][bidder], "SealedAuction: already bid");
 
-        // Take deposit from the actual bidder (they must have approved this contract)
-        a.bidToken.transferFrom(bidder, address(this), a.fixedDeposit);
+        // Take encrypted deposit from the actual bidder (they must have set operator beforehand)
+        _takeDeposit(a.bidToken, bidder, a.fixedDeposit);
 
         // Cap at maxPrice
         ebool withinMax = FHE.le(encPrice, FHE.asEuint64(a.maxPrice));
@@ -366,30 +379,32 @@ contract SealedAuction is ZamaEthereumConfig {
         require(secondPrice >= a.reservePrice, "SealedAuction: below reserve price");
 
         // === Settlement math (all plaintext — guaranteed correct) ===
-        uint256 payment = uint256(secondPrice) * uint256(a.sellAmount);
-        uint256 winnerRefund = a.fixedDeposit - payment;
+        uint256 payment256 = uint256(secondPrice) * uint256(a.sellAmount);
+        require(payment256 <= type(uint64).max, "SealedAuction: payment overflow");
+        uint64 payment = uint64(payment256);
+        uint64 winnerRefund = a.fixedDeposit - payment;
 
         Bid storage winner = auctionBids[winnerIndex];
         a.winnerIndex = winnerIndex;
         a.winnerAddress = winner.bidder;
         a.settledPrice = secondPrice;
 
-        // Transfer sell tokens to winner
+        // Transfer sell tokens to winner (standard ERC-20)
         a.sellToken.transfer(winner.bidder, a.sellAmount);
 
-        // Transfer payment to seller
-        a.bidToken.transfer(a.seller, payment);
+        // Transfer payment to seller via confidential transfer
+        _payFromAuction(a.bidToken, a.seller, payment);
 
-        // Refund winner's excess deposit
+        // Refund winner's excess deposit (encrypted)
         if (winnerRefund > 0) {
-            a.bidToken.transfer(winner.bidder, winnerRefund);
+            _payFromAuction(a.bidToken, winner.bidder, winnerRefund);
         }
         winner.refunded = true;
 
-        // Refund all losers their full deposit
+        // Refund all losers their full deposit (encrypted, per-bidder)
         for (uint256 i = 0; i < auctionBids.length; i++) {
             if (i != winnerIndex && !auctionBids[i].refunded) {
-                a.bidToken.transfer(auctionBids[i].bidder, a.fixedDeposit);
+                _payFromAuction(a.bidToken, auctionBids[i].bidder, a.fixedDeposit);
                 auctionBids[i].refunded = true;
             }
         }
@@ -406,17 +421,36 @@ contract SealedAuction is ZamaEthereumConfig {
         require(a.state == AuctionState.Cancelled, "SealedAuction: not cancelled");
         require(hasBid[auctionId][msg.sender], "SealedAuction: no bid to refund");
 
-        // Find the bidder's bid and refund
+        // Find the bidder's bid and refund (encrypted)
         Bid[] storage auctionBids = bids[auctionId];
         for (uint256 i = 0; i < auctionBids.length; i++) {
             if (auctionBids[i].bidder == msg.sender && !auctionBids[i].refunded) {
                 auctionBids[i].refunded = true;
-                a.bidToken.transfer(msg.sender, a.fixedDeposit);
+                _payFromAuction(a.bidToken, msg.sender, a.fixedDeposit);
                 emit RefundClaimed(auctionId, msg.sender, a.fixedDeposit);
                 return;
             }
         }
         revert("SealedAuction: already refunded");
+    }
+
+    // =========== Internal: ERC-7984 wrappers ===========
+
+    /// @dev Pull `amount` from `from` to this contract via ERC-7984 operator transfer.
+    ///      Caller must have setOperator(this, until) on the bid token.
+    function _takeDeposit(IERC7984 bidToken, address from, uint64 amount) internal {
+        euint64 encAmount = FHE.asEuint64(amount);
+        FHE.allowThis(encAmount);
+        FHE.allow(encAmount, address(bidToken)); // bidToken needs ACL to use the handle
+        bidToken.confidentialTransferFrom(from, address(this), encAmount);
+    }
+
+    /// @dev Push `amount` from this contract to `to` via ERC-7984 confidential transfer.
+    function _payFromAuction(IERC7984 bidToken, address to, uint64 amount) internal {
+        euint64 encAmount = FHE.asEuint64(amount);
+        FHE.allowThis(encAmount);
+        FHE.allow(encAmount, address(bidToken)); // bidToken needs ACL to use the handle
+        bidToken.confidentialTransfer(to, encAmount);
     }
 
     /// @notice Seller reclaims sell tokens from a cancelled auction
@@ -469,7 +503,7 @@ contract SealedAuction is ZamaEthereumConfig {
         uint64 sellAmount,
         uint64 maxPrice,
         uint64 reservePrice,
-        uint256 fixedDeposit,
+        uint64 fixedDeposit,
         uint256 deadline,
         uint256 minBidders,
         AuctionState state,
