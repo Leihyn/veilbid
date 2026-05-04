@@ -1,10 +1,10 @@
 # Vickrey, Confidentiality, and Zama: Building Sealed-Bid Auctions on Encrypted Blockchains
 
-The US Treasury sells $2 trillion in bonds every year. Google sells $200 billion in ad placements. Telecom companies bid $100 billion for spectrum licenses. Carbon markets clear $900 billion in emission allowances.
+March 2020. MakerDAO's liquidation auctions are visible on-chain. Liquidation bots see each other's bids, coordinate, and bid $0. They walk away with $8.3 million in collateral. For free. Nobody cheated. The system worked exactly as designed. The design was the problem.
 
-All of them use sealed-bid auctions. All of them depend on one guarantee: nobody sees anyone else's bid.
+Every on-chain auction publishes its bids in plaintext calldata. Competitors see your price before the auction closes. MEV bots front-run you. Rational participants shade below their true value because overpaying hurts more than losing. The result is worse prices for sellers, worse outcomes for bidders, and a mechanism that excludes institutions entirely.
 
-Now picture running any of these on Ethereum. Every bid sits in plaintext calldata. Your competitors see your price before the auction closes. MEV bots front-run you. Rational participants shade their bids below their true value because overpaying hurts more than losing. The result is worse prices for sellers, worse outcomes for bidders, and a mechanism that excludes institutions entirely.
+This keeps happening. Cumberland, Genesis, and Jump have faced information leakage scandals on OTC desks. IDO launches are routinely front-run by whales who see retail bids in the mempool. The problem is structural: transparent blockchains can't do sealed bids.
 
 This is the gap we set out to close with VeilBid.
 
