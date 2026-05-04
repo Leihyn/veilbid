@@ -248,7 +248,7 @@
         "type": "address"
       },
       {
-        "internalType": "contract MockERC20",
+        "internalType": "contract IERC7984",
         "name": "bidToken",
         "type": "address"
       },
@@ -268,9 +268,9 @@
         "type": "uint64"
       },
       {
-        "internalType": "uint256",
+        "internalType": "uint64",
         "name": "fixedDeposit",
-        "type": "uint256"
+        "type": "uint64"
       },
       {
         "internalType": "uint256",
@@ -418,7 +418,7 @@
         "type": "address"
       },
       {
-        "internalType": "contract MockERC20",
+        "internalType": "contract IERC7984",
         "name": "bidToken",
         "type": "address"
       },
@@ -500,9 +500,9 @@
         "type": "uint64"
       },
       {
-        "internalType": "uint256",
+        "internalType": "uint64",
         "name": "fixedDeposit",
-        "type": "uint256"
+        "type": "uint64"
       },
       {
         "internalType": "uint256",

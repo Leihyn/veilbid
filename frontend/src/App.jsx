@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ethers } from "ethers";
 import auctionAbi from "./contracts/SealedAuction.json";
 import erc20Abi from "./contracts/MockERC20.json";
+import erc7984Abi from "./contracts/VeilBidUSDC.json";
+
+// ERC-7984 operator far-future expiry (~2033)
+const OPERATOR_UNTIL = 2_000_000_000;
 import { ADDRESSES, NETWORK, CHAIN_ID } from "./contracts/addresses.js";
 import "./App.css";
 
@@ -324,7 +328,8 @@ function App() {
     return {
       auction: new ethers.Contract(ADDRESSES.auction, auctionAbi, p),
       sellToken: new ethers.Contract(ADDRESSES.sellToken, erc20Abi, p),
-      bidToken: new ethers.Contract(ADDRESSES.bidToken, erc20Abi, p),
+      // bidToken is VeilBidUSDC (ERC-7984 confidential token)
+      bidToken: new ethers.Contract(ADDRESSES.bidToken, erc7984Abi, p),
     };
   }
 
@@ -359,15 +364,27 @@ function App() {
     if (!provider) return;
     const { sellToken, bidToken } = getContracts();
     const bals = {};
+    // ERC-7984 vbUSDC balances are encrypted (euint64) — we cannot read amounts
+    // from chain without a user-decrypt EIP-712 signature. We surface
+    // balanceIndicator (a public counter that increments on every transfer)
+    // so the UI shows transfer activity without leaking amounts.
     if (IS_TESTNET && walletAddress) {
       const sell = await sellToken.balanceOf(walletAddress);
-      const bid = await bidToken.balanceOf(walletAddress);
-      bals["you"] = { address: walletAddress.slice(0, 8) + "...", sell: sell.toString(), bid: bid.toString() };
+      const bidActivity = await bidToken.balanceIndicator(walletAddress);
+      bals["you"] = {
+        address: walletAddress.slice(0, 8) + "...",
+        sell: sell.toString(),
+        bid: bidActivity > 0n ? "[encrypted]" : "0",
+      };
     } else if (localWallets) {
       for (const [name, wallet] of Object.entries(localWallets)) {
         const sell = await sellToken.balanceOf(wallet.address);
-        const bid = await bidToken.balanceOf(wallet.address);
-        bals[name] = { address: wallet.address.slice(0, 8) + "...", sell: sell.toString(), bid: bid.toString() };
+        const bidActivity = await bidToken.balanceIndicator(wallet.address);
+        bals[name] = {
+          address: wallet.address.slice(0, 8) + "...",
+          sell: sell.toString(),
+          bid: bidActivity > 0n ? "[encrypted]" : "0",
+        };
       }
     }
     setBalances(bals);
@@ -403,11 +420,12 @@ function App() {
       if (IS_TESTNET) {
         const { sellToken, bidToken } = getContracts(signer);
         const addr = walletAddress;
-        log("Minting tokens and setting approvals...");
+        log("Minting tokens, setting approvals + ERC-7984 operator...");
         await (await sellToken.mint(addr, 10000)).wait();
         await (await bidToken.mint(addr, 1000000)).wait();
         await (await sellToken.approve(ADDRESSES.auction, 10000)).wait();
-        await (await bidToken.approve(ADDRESSES.auction, 1000000)).wait();
+        // ERC-7984: setOperator replaces ERC-20 approve (no allowance leak)
+        await (await bidToken.setOperator(ADDRESSES.auction, OPERATOR_UNTIL)).wait();
       } else {
         const seller = localWallets.seller;
         // Force fresh nonce from chain (prevents stale nonce after Hardhat restart)
@@ -419,10 +437,11 @@ function App() {
         }
         await (await sellToken.connect(seller).approve(ADDRESSES.auction, 10000, { nonce: nonce++ })).wait();
         for (const name of ["bidder1", "bidder2", "bidder3", "bidder4"]) {
-          await (await bidToken.connect(localWallets[name]).approve(ADDRESSES.auction, 1000000)).wait();
+          // ERC-7984 setOperator (per-bidder, replaces approve)
+          await (await bidToken.connect(localWallets[name]).setOperator(ADDRESSES.auction, OPERATOR_UNTIL)).wait();
         }
       }
-      log("Tokens ready.", "success");
+      log("Tokens ready (ERC-7984 operator authorized).", "success");
       setSetupDone(true);
       await refreshBalances();
     });
