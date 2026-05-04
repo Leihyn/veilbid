@@ -1,5 +1,5 @@
 {
-  "name": "sealed-auction",
+  "name": "veilbid",
   "version": "1.0.0",
   "description": "On-chain Vickrey (second-price sealed-bid) auction powered by FHE on Zama's fhEVM",
   "dependencies": {
