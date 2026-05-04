@@ -2,6 +2,7 @@ import { HardhatUserConfig } from "hardhat/config";
 import "@fhevm/hardhat-plugin";
 import "@nomicfoundation/hardhat-chai-matchers";
 import "@nomicfoundation/hardhat-ethers";
+import "@nomicfoundation/hardhat-verify";
 import "hardhat-gas-reporter";
 import * as dotenv from "dotenv";
 
@@ -33,6 +34,12 @@ const config: HardhatUserConfig = {
   gasReporter: {
     enabled: true,
     currency: "USD",
+  },
+  etherscan: {
+    apiKey: {
+      sepolia: process.env.ETHERSCAN_API_KEY || "",
+      mainnet: process.env.ETHERSCAN_API_KEY || "",
+    },
   },
 };
 
