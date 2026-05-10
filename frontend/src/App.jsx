@@ -11,6 +11,7 @@ import "./App.css";
 
 const IS_TESTNET = NETWORK === "sepolia";
 const LOCAL_RPC = "http://127.0.0.1:8545";
+const SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
 const MNEMONIC = "test test test test test test test test test test test junk";
 const MAX_LOG_ENTRIES = 50;
 
@@ -283,6 +284,7 @@ function App() {
   const [signer, setSigner] = useState(null);
   const fhevmInstance = useRef(null);
   const [localWallets, setLocalWallets] = useState(null);
+  const [readOnlyMode, setReadOnlyMode] = useState(true);
   const [auctionParams, setAuctionParams] = useState({
     sellAmount: "10000",
     maxPrice: "10",
@@ -445,10 +447,23 @@ function App() {
     setBalances(bals);
   }, [provider, walletAddress, localWallets]);
 
+  // Pattern D: initialize a read-only Sepolia provider on mount so the page
+  // renders the live auction state before any wallet connects.
   useEffect(() => {
-    if (!connected) return;
-    const interval = setInterval(() => { refreshAuction(); refreshBalances(); }, 3000);
-    refreshBalances();
+    if (!IS_TESTNET) return;
+    if (provider) return;
+    const ro = new ethers.JsonRpcProvider(SEPOLIA_RPC);
+    setProvider(ro);
+    findLatestAuction(ro);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshAuction();
+      if (connected) refreshBalances();
+    }, 3000);
+    if (connected) refreshBalances();
     return () => clearInterval(interval);
   }, [connected, refreshAuction, refreshBalances]);
 
@@ -712,47 +727,35 @@ function App() {
     return { min: Number(auctionState.reservePrice), max: Number(auctionState.maxPrice) };
   }, [auctionState]);
 
-  // Welcome / Connect screen
-  if (!connected || showWelcome) {
-    return (
-      <div className="app">
-        <div className="connect-screen">
-          <div className="connect-eyebrow">Confidential Primary Issuance</div>
-          <h2>Confidential <em>Primary Issuance</em><br />for Tokenized Fixed Income</h2>
-          <div className="connect-subtitle">Sealed-bid Vickrey clearing on Zama fhEVM with ERC-7984 settlement</div>
-          <div className="connect-rule" />
-          <p>
-            Public on-chain auctions leak every bid the moment a transaction hits the mempool.
-            Institutional buyers won't reveal yield reservations into a public book — so they don't show up.
-            VeilBid encrypts bids <strong>client-side with FHE</strong>, clears at the second-highest price (Vickrey),
-            and exposes selective post-trade decryption to a named regulator.
-          </p>
-          <div className="connect-features">
-            <div className="connect-feature">FHE-Sealed Bids</div>
-            <div className="connect-feature">Vickrey Clearing</div>
-            <div className="connect-feature">Reg D / 144A Disclosure</div>
-          </div>
-          {IS_TESTNET ? (
-            <button className="btn-connect" onClick={connectWallet} disabled={!!loading}>
-              {loading || "Connect Wallet"}
-            </button>
-          ) : (
-            <button className="btn-connect" onClick={initLocal}>
-              Enter Protocol
-            </button>
-          )}
-          <div className="connect-meta">
-            <span className="connect-meta-item">27 Tests Passing</span>
-            <span className="connect-meta-item">14 FHE Primitives</span>
-            <span className="connect-meta-item">Deployed on Sepolia</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="app">
+      {/* Pattern D: marketing banner — always visible, replaces the connect-gate screen.
+          Compact when connected; expanded with body copy when not. */}
+      <div className="hero-banner" style={{
+        padding: connected ? "16px 24px 14px" : "28px 24px 22px",
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        marginBottom: 12,
+      }}>
+        <div className="connect-eyebrow" style={{ fontSize: 10, letterSpacing: "0.16em" }}>Confidential Primary Issuance</div>
+        <h2 style={{ margin: connected ? "4px 0 0" : "8px 0 6px", fontSize: connected ? "1.5em" : "2.2em", lineHeight: 1.15 }}>
+          Confidential <em>Primary Issuance</em>{connected ? " · " : <br />}for Tokenized Fixed Income
+        </h2>
+        {!connected && (
+          <>
+            <div className="connect-subtitle" style={{ marginTop: 6 }}>Sealed-bid Vickrey clearing on Zama fhEVM with ERC-7984 settlement</div>
+            <p style={{ maxWidth: 720, margin: "12px 0 14px", opacity: 0.85, fontSize: 13, lineHeight: 1.55 }}>
+              Public on-chain auctions leak every bid the moment a transaction hits the mempool. Institutional buyers won't reveal yield reservations into a public book — so they don't show up. VeilBid encrypts bids <strong>client-side with FHE</strong>, clears at the second-highest price (Vickrey), and exposes selective post-trade decryption to a named regulator.
+            </p>
+          </>
+        )}
+        <div className="connect-meta" style={{ marginTop: connected ? 4 : 6, fontSize: 10 }}>
+          <span className="connect-meta-item">27 Tests Passing</span>
+          <span className="connect-meta-item">14 FHE Primitives</span>
+          <span className="connect-meta-item">Live on Sepolia · ERC-7984</span>
+          <span className="connect-meta-item">{connected ? "Reg D / 144A Disclosure" : "Built on Zama Protocol"}</span>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="header">
         <div className="header-left">
@@ -762,12 +765,20 @@ function App() {
           </div>
           <span className="tagline">Confidential primary issuance · ERC-7984 settlement</span>
         </div>
-        {walletAddress && (
+        {walletAddress ? (
           <div className="wallet-badge">
             <span className="wallet-dot" />
             {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
             <span className="network-tag">Sepolia</span>
           </div>
+        ) : IS_TESTNET ? (
+          <button className="btn btn-primary" onClick={connectWallet} disabled={!!loading} style={{ padding: "10px 22px" }}>
+            {loading || "Connect Wallet"}
+          </button>
+        ) : (
+          <button className="btn btn-primary" onClick={initLocal} style={{ padding: "10px 22px" }}>
+            Enter Protocol
+          </button>
         )}
       </div>
 
@@ -972,6 +983,53 @@ function App() {
             )}
 
             <div className="action-section" style={{ marginTop: (loading || lastError) ? 12 : 0 }}>
+              {/* Pattern D: Pre-connect CTA — visible whenever an action is available but no wallet connected */}
+              {!connected && auctionState && auctionState.state !== 5 && (
+                <div className="action-with-hint">
+                  <button
+                    className="btn btn-primary"
+                    onClick={IS_TESTNET ? connectWallet : initLocal}
+                    disabled={!!loading}
+                    style={{ padding: "12px 28px" }}
+                  >
+                    {loading || `Connect Wallet to ${
+                      auctionState.state === 0 && !auctionState.deadlinePassed
+                        ? "Submit a Confidential Bid"
+                        : auctionState.state === 0 && auctionState.deadlinePassed
+                        ? "Close This Bid Window"
+                        : auctionState.state === 1
+                        ? "Trigger FHE Clearing (Pass 1)"
+                        : auctionState.state === 2
+                        ? "Compute Clearing Price (Pass 2)"
+                        : auctionState.state === 3
+                        ? "Settle This Allocation"
+                        : auctionState.state === 4
+                        ? "Grant Regulator Disclosure"
+                        : "Interact"
+                    }`}
+                  </button>
+                  <span className="action-hint">
+                    You're watching this round read-only. Connect to participate. The 5 confidential bids above were submitted by institutional QIBs — their bid prices stay encrypted on-chain forever.
+                  </span>
+                </div>
+              )}
+
+              {!connected && !auctionState && (
+                <div className="action-with-hint">
+                  <button
+                    className="btn btn-primary"
+                    onClick={IS_TESTNET ? connectWallet : initLocal}
+                    disabled={!!loading}
+                    style={{ padding: "12px 28px" }}
+                  >
+                    {loading || "Connect Wallet"}
+                  </button>
+                  <span className="action-hint">
+                    Loading live Sepolia state. Connect a wallet to interact with the issuance round.
+                  </span>
+                </div>
+              )}
+
               {/* Setup + Create */}
               {connected && !setupDone && auctionId === null && (
                 <div className="action-with-hint">
@@ -1026,7 +1084,7 @@ function App() {
               )}
 
               {/* Bidding Phase */}
-              {auctionState?.state === 0 && !auctionState?.deadlinePassed && (
+              {connected && auctionState?.state === 0 && !auctionState?.deadlinePassed && (
                 <>
                   <div className="bid-input-group">
                     {!IS_TESTNET && (
@@ -1063,7 +1121,7 @@ function App() {
               )}
 
               {/* Close */}
-              {auctionState?.state === 0 && auctionState?.deadlinePassed && (
+              {connected && auctionState?.state === 0 && auctionState?.deadlinePassed && (
                 <div className="action-with-hint">
                   <button className="btn btn-primary" onClick={closeAuction} disabled={!!loading}>
                     Close Bid Window ({auctionState.bidCount} bids received)
@@ -1073,7 +1131,7 @@ function App() {
               )}
 
               {/* Resolve */}
-              {auctionState?.state === 1 && (
+              {connected && auctionState?.state === 1 && (
                 <div className="action-with-hint">
                   <button className="btn btn-primary" onClick={resolvePass1} disabled={!!loading}>
                     Discover Highest Bid (FHE)
@@ -1081,7 +1139,7 @@ function App() {
                   <span className="action-hint">N-1 homomorphic comparisons find the maximum encrypted bid. Pass 1 of two — gas split for block-limit safety.</span>
                 </div>
               )}
-              {auctionState?.state === 2 && (
+              {connected && auctionState?.state === 2 && (
                 <div className="action-with-hint">
                   <button className="btn btn-primary" onClick={resolvePass2} disabled={!!loading}>
                     Compute Clearing Price (FHE)
@@ -1091,7 +1149,7 @@ function App() {
               )}
 
               {/* Settle */}
-              {auctionState?.state === 3 && (
+              {connected && auctionState?.state === 3 && (
                 <div className="action-with-hint">
                   <button className="btn btn-success" onClick={settle} disabled={!!loading}>
                     Settle Allocation
@@ -1101,7 +1159,7 @@ function App() {
               )}
 
               {/* Regulator Disclosure */}
-              {auctionState?.state === 4 && !complianceDone && (
+              {connected && auctionState?.state === 4 && !complianceDone && (
                 <div className="compliance-section">
                   <div className="compliance-tiers">
                     <div className="compliance-tier">
