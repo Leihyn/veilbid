@@ -14,6 +14,45 @@ const LOCAL_RPC = "http://127.0.0.1:8545";
 const MNEMONIC = "test test test test test test test test test test test junk";
 const MAX_LOG_ENTRIES = 50;
 
+// === Issuance demo context (frontend display only — contract is asset-agnostic) ===
+const FACE_VALUE_CENTS = 10_000;            // $100.00 par per unit
+const TENOR_DAYS = 90;
+const ISSUER_NAME = "Acme Capital";
+const INSTRUMENT = "90-day Commercial Paper";
+const SETTLEMENT_TOKEN = "vbUSDC";
+
+const QIB_NAMES = [
+  "Pension Fund A",
+  "Asset Manager B",
+  "Treasury Desk C",
+  "Insurance Co D",
+  "Family Office E",
+];
+
+// Implied annualized yield (360-day basis) from a discount-price bid in cents
+function impliedYield(clearingCents, tenorDays = TENOR_DAYS) {
+  const cents = Number(clearingCents);
+  if (!cents || cents >= FACE_VALUE_CENTS) return 0;
+  return ((FACE_VALUE_CENTS - cents) / cents) * (360 / tenorDays) * 100;
+}
+
+// Format cents-as-price into "$XX.YY"
+function formatPrice(cents) {
+  const n = Number(cents);
+  if (!n) return "—";
+  return `$${(n / 100).toFixed(2)}`;
+}
+
+// Format an integer count with thousands separators
+function fmtInt(n) {
+  return Number(n || 0).toLocaleString();
+}
+
+// Notional cleared: lotSize × clearingPrice (in $)
+function notionalCleared(lotSize, clearingCents) {
+  return (Number(lotSize || 0) * Number(clearingCents || 0)) / 100;
+}
+
 function getLocalWallets() {
   const rpcProvider = new ethers.JsonRpcProvider(LOCAL_RPC);
   const wallets = {};
@@ -29,12 +68,12 @@ function getLocalWallets() {
 }
 
 const PHASES = [
-  { key: "create", label: "Create", desc: "Seller locks tokens and sets auction parameters" },
-  { key: "bid", label: "Bid", desc: "Bidders encrypt prices client-side and submit ciphertext" },
-  { key: "close", label: "Close", desc: "Bidding window ends, no more bids accepted" },
-  { key: "resolve", label: "Resolve", desc: "FHE tournament finds winner and second price on encrypted data" },
-  { key: "settle", label: "Settle", desc: "Winner pays second-highest price, losers get refunds" },
-  { key: "compliance", label: "Compliance", desc: "Winner or seller grants regulator access to decrypt bids" },
+  { key: "create", label: "Open Round", desc: "Issuer locks the lot and opens the bid window" },
+  { key: "bid", label: "Submit Bids", desc: "QIBs encrypt discount-price bids client-side and submit ciphertext" },
+  { key: "close", label: "Close Window", desc: "Bid window ends, no more submissions accepted" },
+  { key: "resolve", label: "FHE Clear", desc: "Tournament finds the clearing price on encrypted data" },
+  { key: "settle", label: "Allocate", desc: "Winner pays clearing price; losers refunded" },
+  { key: "compliance", label: "Disclosure", desc: "Issuer or winner grants regulator decryption access" },
 ];
 
 function getPhaseIndex(state, complianceDone) {
@@ -49,10 +88,10 @@ function getPhaseIndex(state, complianceDone) {
 function getStatusInfo(state) {
   const map = {
     0: { label: "Open", cls: "status-open" },
-    1: { label: "Closed", cls: "status-closed" },
-    2: { label: "Resolving", cls: "status-resolving" },
-    3: { label: "Resolved", cls: "status-resolved" },
-    4: { label: "Settled", cls: "status-settled" },
+    1: { label: "Bid Window Closed", cls: "status-closed" },
+    2: { label: "Discovering Max", cls: "status-resolving" },
+    3: { label: "Cleared", cls: "status-resolved" },
+    4: { label: "Allocated", cls: "status-settled" },
     5: { label: "Cancelled", cls: "status-cancelled" },
   };
   return map[state] || { label: "Unknown", cls: "" };
@@ -185,8 +224,8 @@ function BidCards({ bidCount, auctionState }) {
       <thead>
         <tr>
           <th>#</th>
-          <th>Bidder</th>
-          <th>Amount</th>
+          <th>QIB</th>
+          <th>Bid (encrypted)</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -196,7 +235,7 @@ function BidCards({ bidCount, auctionState }) {
           return (
             <tr key={i} className={isWinner ? "winner-row" : ""}>
               <td><span className="bid-id">{String(i + 1).padStart(2, "0")}</span></td>
-              <td>{["Pension Fund A", "Asset Manager B", "Treasury Desk C", "Insurance Co D", "Family Office E"][i] || `Bidder #${i + 1}`}</td>
+              <td>{QIB_NAMES[i] || `QIB #${i + 1}`}</td>
               <td>
                 {isWinner
                   ? <span className="bid-amount-hidden">WINNER</span>
@@ -343,6 +382,21 @@ function App() {
       const blockTime = block ? block.timestamp : Math.floor(Date.now() / 1000);
       const deadline = Number(info.deadline);
       const remaining = deadline - blockTime;
+
+      // Derive winnerIndex by matching winnerAddress against on-chain bidder roster.
+      // getAuction() doesn't return the index directly; we need it for UI highlighting.
+      let winnerIndex = -1;
+      if (Number(info.state) >= 4 && info.winnerAddress && info.winnerAddress !== ethers.ZeroAddress) {
+        try {
+          const n = Number(bidCount);
+          const winnerLower = info.winnerAddress.toLowerCase();
+          for (let i = 0; i < n; i++) {
+            const bidder = await auction.getBidder(auctionId, i);
+            if (bidder.toLowerCase() === winnerLower) { winnerIndex = i; break; }
+          }
+        } catch { /* indices unreadable, fall through with -1 */ }
+      }
+
       setAuctionState({
         seller: info.seller,
         sellAmount: info.sellAmount.toString(),
@@ -355,6 +409,7 @@ function App() {
         state: Number(info.state),
         bidCount: bidCount.toString(),
         winnerAddress: info.winnerAddress,
+        winnerIndex,
         settledPrice: info.settledPrice.toString(),
       });
     } catch (e) { /* Auction doesn't exist yet */ }
@@ -462,7 +517,7 @@ function App() {
       const { auction: ac } = getContracts();
       const nextId = await ac.nextAuctionId();
       setAuctionId(nextId - 1n);
-      log(`Auction #${nextId - 1n} created (${dur / 60}min window, ${sa} tokens, price ${rp}-${mp})`, "success");
+      log(`Issuance Round #${nextId - 1n} opened (${dur / 60}min bid window, lot=${sa} units, price range ${rp}-${mp})`, "success");
       await refreshAuction();
       await refreshBalances();
     });
@@ -519,7 +574,7 @@ function App() {
       const s = IS_TESTNET ? signer : localWallets.seller;
       const { auction } = getContracts(s);
       await (await auction.closeAuction(auctionId)).wait();
-      log("Auction closed. Bidding window ended.", "success");
+      log("Bid window closed.", "success");
       await refreshAuction();
     });
   }
@@ -644,7 +699,7 @@ function App() {
     setComplianceDone(false);
     setSetupDone(true);
     setLastError(null);
-    log("Ready for new auction.", "success");
+    log("Ready for new issuance round.", "success");
   }
 
   // ========== Render ==========
@@ -662,19 +717,20 @@ function App() {
     return (
       <div className="app">
         <div className="connect-screen">
-          <div className="connect-eyebrow">Confidential Auction Infrastructure</div>
-          <h2>Sealed <em>Bids</em>,<br />Open Markets</h2>
-          <div className="connect-subtitle">Confidential price discovery for on-chain finance</div>
+          <div className="connect-eyebrow">Confidential Primary Issuance</div>
+          <h2>Confidential <em>Primary Issuance</em><br />for Tokenized Fixed Income</h2>
+          <div className="connect-subtitle">Sealed-bid Vickrey clearing on Zama fhEVM with ERC-7984 settlement</div>
           <div className="connect-rule" />
           <p>
-            Every on-chain auction publishes its bids in plaintext.
-            VeilBid encrypts prices <strong>client-side with FHE</strong> so they never appear in calldata.
-            The winner pays the second-highest price. Regulators get selective access.
+            Public on-chain auctions leak every bid the moment a transaction hits the mempool.
+            Institutional buyers won't reveal yield reservations into a public book — so they don't show up.
+            VeilBid encrypts bids <strong>client-side with FHE</strong>, clears at the second-highest price (Vickrey),
+            and exposes selective post-trade decryption to a named regulator.
           </p>
           <div className="connect-features">
-            <div className="connect-feature">FHE-Encrypted</div>
-            <div className="connect-feature">Vickrey (2nd Price)</div>
-            <div className="connect-feature">Compliance Ready</div>
+            <div className="connect-feature">FHE-Sealed Bids</div>
+            <div className="connect-feature">Vickrey Clearing</div>
+            <div className="connect-feature">Reg D / 144A Disclosure</div>
           </div>
           {IS_TESTNET ? (
             <button className="btn-connect" onClick={connectWallet} disabled={!!loading}>
@@ -704,7 +760,7 @@ function App() {
             <img src="/logo.jpg" alt="VeilBid" className="logo-icon" />
             <h1>VeilBid</h1>
           </div>
-          <span className="tagline">Confidential price discovery for on-chain finance</span>
+          <span className="tagline">Confidential primary issuance · ERC-7984 settlement</span>
         </div>
         {walletAddress && (
           <div className="wallet-badge">
@@ -732,37 +788,47 @@ function App() {
           {auctionState ? (
             <div className="card">
               <div className="card-header">
-                <span className="card-title">Auction #{auctionId?.toString()}</span>
+                <span className="card-title">Issuance Round #{auctionId?.toString()}</span>
                 <span className={`status-badge ${status.cls}`}>
                   <span className="status-dot" />
                   {status.label}
                 </span>
               </div>
 
+              {/* Issuance Details (Tier 4) — demo context for the institutional pitch */}
+              <div className="issuance-details" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: "8px 24px", padding: "12px 16px", marginBottom: 12, fontFamily: "var(--ff-mono)", fontSize: 11, lineHeight: 1.6, border: "1px solid var(--border, rgba(255,255,255,0.08))", borderRadius: 6, background: "rgba(255,255,255,0.02)" }}>
+                <div><span style={{ opacity: 0.55 }}>Issuer:</span> <strong>{ISSUER_NAME}</strong> <span style={{ opacity: 0.4 }}>(demo)</span></div>
+                <div><span style={{ opacity: 0.55 }}>Instrument:</span> <strong>{INSTRUMENT}</strong></div>
+                <div><span style={{ opacity: 0.55 }}>Face Value:</span> <strong>$100 per unit</strong></div>
+                <div><span style={{ opacity: 0.55 }}>Settlement:</span> <strong>{SETTLEMENT_TOKEN} (ERC-7984)</strong></div>
+                <div><span style={{ opacity: 0.55 }}>Lot Size:</span> <strong>{fmtInt(auctionState.sellAmount)} units</strong> <span style={{ opacity: 0.4 }}>= ${fmtInt(Number(auctionState.sellAmount) * 100)} face</span></div>
+                <div><span style={{ opacity: 0.55 }}>Tenor:</span> <strong>{TENOR_DAYS} days</strong></div>
+              </div>
+
               <div className="auction-grid">
                 <div className="auction-stat">
-                  <div className="auction-stat-label">Sell Amount</div>
-                  <div className="auction-stat-value">{Number(auctionState.sellAmount).toLocaleString()} <span className="auction-stat-unit">SELL</span></div>
+                  <div className="auction-stat-label">Lot Size</div>
+                  <div className="auction-stat-value">{fmtInt(auctionState.sellAmount)} <span className="auction-stat-unit">units</span></div>
                 </div>
                 <div className="auction-stat">
-                  <div className="auction-stat-label">Max Price</div>
-                  <div className="auction-stat-value">{auctionState.maxPrice} <span className="auction-stat-unit">/unit</span></div>
+                  <div className="auction-stat-label">Price Ceiling</div>
+                  <div className="auction-stat-value">{formatPrice(auctionState.maxPrice)} <span className="auction-stat-unit">per $100 face</span></div>
                 </div>
                 <div className="auction-stat">
-                  <div className="auction-stat-label">Reserve</div>
-                  <div className="auction-stat-value">{auctionState.reservePrice} <span className="auction-stat-unit">/unit</span></div>
+                  <div className="auction-stat-label">Reserve Floor</div>
+                  <div className="auction-stat-value">{formatPrice(auctionState.reservePrice)} <span className="auction-stat-unit">per $100 face</span></div>
                 </div>
                 <div className="auction-stat">
-                  <div className="auction-stat-label">Deposit Required</div>
-                  <div className="auction-stat-value small">{Number(auctionState.fixedDeposit).toLocaleString()} <span className="auction-stat-unit">USDC</span></div>
+                  <div className="auction-stat-label">Deposit per QIB</div>
+                  <div className="auction-stat-value small">{fmtInt(auctionState.fixedDeposit)} <span className="auction-stat-unit">{SETTLEMENT_TOKEN}</span></div>
                 </div>
                 <div className="auction-stat">
-                  <div className="auction-stat-label">Encrypted Bids</div>
+                  <div className="auction-stat-label">Confidential Bids</div>
                   <div className="auction-stat-value">{auctionState.bidCount} <span className="auction-stat-unit">/ {auctionState.minBidders} min</span></div>
                 </div>
                 {auctionState.state === 0 && (
                   <div className="auction-stat">
-                    <div className="auction-stat-label">Deadline</div>
+                    <div className="auction-stat-label">Bid Window Closes</div>
                     <div className={`countdown ${auctionState.deadlinePassed ? "expired" : ""}`}>
                       {auctionState.deadlinePassed ? "Expired" : `${Math.floor(auctionState.timeRemaining / 60)}:${String(auctionState.timeRemaining % 60).padStart(2, "0")}`}
                     </div>
@@ -784,25 +850,99 @@ function App() {
             </div>
           )}
 
-          {/* Settlement Result */}
+          {/* Settlement Result — Tier 2: clearing price + implied yield */}
           {auctionState?.state >= 4 && auctionState?.state !== 5 && (
             <div className="settlement-result">
-              <div className="settlement-eyebrow">Auction Complete</div>
-              <div className="settlement-label">Settlement Price (2nd Price)</div>
+              <div className="settlement-eyebrow">Allocation Cleared</div>
+              <div className="settlement-label">Clearing Price (Vickrey)</div>
               <div className="settlement-price">
-                {auctionState.settledPrice}<span className="settlement-price-unit">/unit</span>
+                {formatPrice(auctionState.settledPrice)}<span className="settlement-price-unit">per $100 face</span>
               </div>
-              <div className="settlement-detail">
-                Winner: <strong>{auctionState.winnerAddress?.slice(0, 10)}...</strong> pays the second-highest bid, not their own.
+              <div style={{ marginTop: 8, fontFamily: "var(--ff-mono)", fontSize: 12, opacity: 0.85 }}>
+                <strong>Implied Yield: {impliedYield(auctionState.settledPrice).toFixed(2)}%</strong>
+                <span style={{ opacity: 0.55 }}> ({TENOR_DAYS}-day basis, 360-day annualization)</span>
+              </div>
+              <div style={{ marginTop: 6, fontFamily: "var(--ff-mono)", fontSize: 11, opacity: 0.7 }}>
+                Notional cleared: ${fmtInt(notionalCleared(auctionState.sellAmount, auctionState.settledPrice))} · {fmtInt(auctionState.sellAmount)} units allocated
+              </div>
+              <div className="settlement-detail" style={{ marginTop: 10 }}>
+                Winner: <strong>{QIB_NAMES[auctionState.winnerIndex] || auctionState.winnerAddress?.slice(0, 10) + "..."}</strong> pays the clearing price, not their own bid. Losing bids stay encrypted forever.
               </div>
             </div>
           )}
 
-          {/* Encrypted Bids */}
+          {/* Issuer Dashboard — Tier 3: visible to seller only after clearing */}
+          {auctionState?.state >= 3 && auctionState?.state !== 5 && walletAddress && auctionState.seller?.toLowerCase() === walletAddress?.toLowerCase() && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-header">
+                <span className="card-title">Issuer Dashboard</span>
+                <span style={{ fontFamily: "var(--ff-mono)", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>Visible to issuer only</span>
+              </div>
+              <div style={{ padding: "12px 16px", fontFamily: "var(--ff-mono)", fontSize: 12, lineHeight: 1.7 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 16, marginBottom: 16 }}>
+                  <div>
+                    <div style={{ opacity: 0.55, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Bids Received</div>
+                    <div style={{ fontSize: 18, marginTop: 4 }}>{auctionState.bidCount} / {auctionState.minBidders} min</div>
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.55, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Clearing Yield</div>
+                    <div style={{ fontSize: 18, marginTop: 4 }}>
+                      {auctionState.state >= 4 ? `${impliedYield(auctionState.settledPrice).toFixed(2)}%` : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.55, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Notional Cleared</div>
+                    <div style={{ fontSize: 18, marginTop: 4 }}>
+                      {auctionState.state >= 4 ? `$${fmtInt(notionalCleared(auctionState.sellAmount, auctionState.settledPrice))}` : "—"}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ opacity: 0.55, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 8 }}>Allocation Roster</div>
+                <table className="bid-table" style={{ marginTop: 6 }}>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>QIB</th>
+                      <th>Address</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: Number(auctionState.bidCount) }, (_, i) => {
+                      const isWinner = auctionState.state >= 4 && Number(auctionState.winnerIndex) === i;
+                      return (
+                        <tr key={i} className={isWinner ? "winner-row" : ""}>
+                          <td><span className="bid-id">{String(i + 1).padStart(2, "0")}</span></td>
+                          <td>{QIB_NAMES[i] || `QIB #${i + 1}`}</td>
+                          <td style={{ opacity: 0.6, fontSize: 10 }}>
+                            {isWinner ? auctionState.winnerAddress?.slice(0, 12) + "..." : "—"}
+                          </td>
+                          <td>
+                            {auctionState.state < 4 ? (
+                              <span style={{ opacity: 0.5 }}>Pending</span>
+                            ) : isWinner ? (
+                              <span className="bid-status winner-status"><span className="bid-status-dot" />Allocated</span>
+                            ) : (
+                              <span style={{ opacity: 0.7 }}>Refunded</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 12, fontSize: 11, opacity: 0.6 }}>
+                  Losing bids encrypted forever. Per-trade regulator decryption available via <code>revealForCompliance</code> below.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Confidential Bids */}
           {auctionState && auctionState.state >= 0 && auctionState.state !== 5 && (
             <div className="card" style={{ marginTop: 16 }}>
               <div className="card-header">
-                <span className="card-title">Encrypted Bids</span>
+                <span className="card-title">Confidential Bids</span>
                 <span style={{ fontFamily: "var(--ff-mono)", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>Prices hidden by FHE</span>
               </div>
               <BidCards bidCount={auctionState.bidCount} auctionState={auctionState} />
@@ -846,42 +986,42 @@ function App() {
                   <div className="auction-form">
                     <div className="auction-form-row">
                       <div className="field">
-                        <label>Sell Amount</label>
+                        <label>Lot Size (units)</label>
                         <input type="number" value={auctionParams.sellAmount}
                           onChange={e => setAuctionParams(p => ({...p, sellAmount: e.target.value}))} min="1" />
                       </div>
                       <div className="field">
-                        <label>Max Price</label>
+                        <label>Price Ceiling (cents per $100 face)</label>
                         <input type="number" value={auctionParams.maxPrice}
                           onChange={e => setAuctionParams(p => ({...p, maxPrice: e.target.value}))} min="1" />
                       </div>
                       <div className="field">
-                        <label>Reserve Price</label>
+                        <label>Reserve Floor (cents per $100 face)</label>
                         <input type="number" value={auctionParams.reservePrice}
                           onChange={e => setAuctionParams(p => ({...p, reservePrice: e.target.value}))} min="0" />
                       </div>
                     </div>
                     <div className="auction-form-row">
                       <div className="field">
-                        <label>Duration (sec)</label>
+                        <label>Bid Window (sec)</label>
                         <input type="number" value={auctionParams.duration}
                           onChange={e => setAuctionParams(p => ({...p, duration: e.target.value}))} min="10" />
                       </div>
                       <div className="field">
-                        <label>Min Bidders</label>
+                        <label>Min QIBs</label>
                         <input type="number" value={auctionParams.minBidders}
-                          onChange={e => setAuctionParams(p => ({...p, minBidders: e.target.value}))} min="2" />
+                          onChange={e => setAuctionParams(p => ({...p, minBidders: e.target.value}))} min="3" />
                       </div>
                       <div className="field">
-                        <label>Deposit</label>
+                        <label>Deposit per QIB</label>
                         <div className="field-computed">{(Number(auctionParams.maxPrice) * Number(auctionParams.sellAmount)) || 0}</div>
                       </div>
                     </div>
                   </div>
                   <button className="btn btn-primary" onClick={createAuction} disabled={!!loading}>
-                    Create Auction
+                    Open Issuance Round
                   </button>
-                  <span className="action-hint">Locks {auctionParams.sellAmount} sell tokens. Each bidder deposits {(Number(auctionParams.maxPrice) * Number(auctionParams.sellAmount)) || "?"} bid tokens. Bidding window: {Math.round(Number(auctionParams.duration) / 60)} min.</span>
+                  <span className="action-hint">Locks {auctionParams.sellAmount} units in escrow. Each QIB deposits {(Number(auctionParams.maxPrice) * Number(auctionParams.sellAmount)) || "?"} {SETTLEMENT_TOKEN}. Bid window: {Math.round(Number(auctionParams.duration) / 60)} min. Min QIB participation: {auctionParams.minBidders}.</span>
                 </div>
               )}
 
@@ -891,32 +1031,32 @@ function App() {
                   <div className="bid-input-group">
                     {!IS_TESTNET && (
                       <select className="bidder-select" value={selectedBidder} onChange={(e) => setSelectedBidder(e.target.value)}>
-                        <option value="bidder1">Bidder 1</option>
-                        <option value="bidder2">Bidder 2</option>
-                        <option value="bidder3">Bidder 3</option>
-                        <option value="bidder4">Bidder 4</option>
+                        <option value="bidder1">{QIB_NAMES[0]}</option>
+                        <option value="bidder2">{QIB_NAMES[1]}</option>
+                        <option value="bidder3">{QIB_NAMES[2]}</option>
+                        <option value="bidder4">{QIB_NAMES[3]}</option>
                       </select>
                     )}
                     <input
                       className="bid-input"
                       type="number"
-                      placeholder={`Price per unit (${bidRange.min}-${bidRange.max})`}
+                      placeholder={`Discount-price bid (${bidRange.min}-${bidRange.max} cents per $100 face)`}
                       value={bidPrice}
                       onChange={(e) => setBidPrice(e.target.value)}
                       min={bidRange.min}
                       max={bidRange.max}
                     />
                     <button className="btn btn-primary" onClick={submitBid} disabled={!!loading}>
-                      Encrypt &amp; Bid
+                      Encrypt &amp; Submit
                     </button>
                   </div>
                   <span className="action-hint">
-                    Your bid is encrypted in the browser using TFHE before submission. The plaintext price never leaves your device.
-                    Valid range: {bidRange.min} to {bidRange.max} per unit.
+                    Your bid is encrypted in the browser with TFHE WASM before submission. The plaintext price never leaves your device.
+                    Valid range: {formatPrice(bidRange.min)}–{formatPrice(bidRange.max)} per $100 face.
                   </span>
                   {Number(auctionState.bidCount) >= Number(auctionState.minBidders) && (
                     <button className="btn btn-secondary" onClick={closeAuction} disabled={!!loading}>
-                      {IS_TESTNET ? "Close Auction (after deadline)" : "Close Auction"}
+                      {IS_TESTNET ? "Close Bid Window (after deadline)" : "Close Bid Window"}
                     </button>
                   )}
                 </>
@@ -926,9 +1066,9 @@ function App() {
               {auctionState?.state === 0 && auctionState?.deadlinePassed && (
                 <div className="action-with-hint">
                   <button className="btn btn-primary" onClick={closeAuction} disabled={!!loading}>
-                    Close Auction ({auctionState.bidCount} bids received)
+                    Close Bid Window ({auctionState.bidCount} bids received)
                   </button>
-                  <span className="action-hint">Deadline has passed. Close the auction to begin the FHE resolution process.</span>
+                  <span className="action-hint">Bid window deadline has passed. Close the round to begin FHE clearing.</span>
                 </div>
               )}
 
@@ -936,17 +1076,17 @@ function App() {
               {auctionState?.state === 1 && (
                 <div className="action-with-hint">
                   <button className="btn btn-primary" onClick={resolvePass1} disabled={!!loading}>
-                    Resolve Pass 1: FHE Tournament
+                    Discover Highest Bid (FHE)
                   </button>
-                  <span className="action-hint">Runs N-1 homomorphic comparisons to find the highest encrypted bid without decrypting any values.</span>
+                  <span className="action-hint">N-1 homomorphic comparisons find the maximum encrypted bid. Pass 1 of two — gas split for block-limit safety.</span>
                 </div>
               )}
               {auctionState?.state === 2 && (
                 <div className="action-with-hint">
                   <button className="btn btn-primary" onClick={resolvePass2} disabled={!!loading}>
-                    Resolve Pass 2: Find Winner &amp; 2nd Price
+                    Compute Clearing Price (FHE)
                   </button>
-                  <span className="action-hint">Excludes the winner's bid, runs a second tournament to find the settlement price, and marks the winner.</span>
+                  <span className="action-hint">First-match exclusion of the winner; second tournament finds the clearing price (Vickrey 2nd-highest); winner index marked publicly decryptable.</span>
                 </div>
               )}
 
@@ -954,34 +1094,34 @@ function App() {
               {auctionState?.state === 3 && (
                 <div className="action-with-hint">
                   <button className="btn btn-success" onClick={settle} disabled={!!loading}>
-                    Settle Auction
+                    Settle Allocation
                   </button>
-                  <span className="action-hint">Scans all possible winner/price combinations to find the correct settlement. Winner receives tokens, losers get refunds.</span>
+                  <span className="action-hint">On-chain FHE.eq verifies the off-chain-decrypted clearing price. Winner receives the lot; losers get encrypted refunds via ERC-7984.</span>
                 </div>
               )}
 
-              {/* Compliance */}
+              {/* Regulator Disclosure */}
               {auctionState?.state === 4 && !complianceDone && (
                 <div className="compliance-section">
                   <div className="compliance-tiers">
                     <div className="compliance-tier">
-                      <div className="compliance-tier-label public">Public Tier</div>
-                      <div className="compliance-tier-value">Settlement price: {auctionState.settledPrice}/unit</div>
-                      <div className="compliance-tier-desc">Visible to everyone after settlement</div>
+                      <div className="compliance-tier-label public">Public Disclosure</div>
+                      <div className="compliance-tier-value">Clearing price: {formatPrice(auctionState.settledPrice)} per $100 face \u00b7 Yield: {impliedYield(auctionState.settledPrice).toFixed(2)}%</div>
+                      <div className="compliance-tier-desc">Visible to everyone post-settlement (it's the payment amount)</div>
                     </div>
                     <div className="compliance-tier restricted">
-                      <div className="compliance-tier-label restricted">Restricted Tier</div>
-                      <div className="compliance-tier-value">Winning bid: encrypted</div>
-                      <div className="compliance-tier-desc">Only visible to addresses granted access</div>
+                      <div className="compliance-tier-label restricted">Restricted Disclosure</div>
+                      <div className="compliance-tier-value">Winner's actual bid: encrypted</div>
+                      <div className="compliance-tier-desc">Selectively decryptable by addresses granted access \u2014 maps onto Reg D / 144A regimes</div>
                     </div>
                   </div>
                   <button className="btn btn-primary" onClick={revealCompliance} disabled={!!loading}>
-                    Grant Regulator Access
+                    Grant Regulator Decryption
                   </button>
                   <span className="action-hint">
                     {IS_TESTNET
-                      ? `Only the winner (${auctionState.winnerAddress?.slice(0, 10)}...) or the seller can grant access. Your connected wallet must be one of them.`
-                      : "The winner grants the regulator address decryption access to the winning bid via FHE.allow."
+                      ? `Only the winner (${auctionState.winnerAddress?.slice(0, 10)}...) or the issuer can grant access. Connected wallet must be one of them.`
+                      : "The winner grants the regulator decryption access to the winning bid via FHE.allow."
                     }
                   </span>
                 </div>
@@ -991,10 +1131,10 @@ function App() {
                 <div className="completion-block success">
                   <span className="completion-icon">{"\u2713"}</span>
                   <div className="completion-text">
-                    <strong>Auction complete.</strong> Compliance access granted. The regulator can now decrypt the winning bid.
+                    <strong>Issuance complete.</strong> Regulator decryption access granted. Losing bids remain encrypted.
                   </div>
                   <button className="btn btn-primary" onClick={resetForNewAuction} disabled={!!loading}>
-                    New Auction
+                    New Issuance
                   </button>
                 </div>
               )}
@@ -1003,10 +1143,10 @@ function App() {
                 <div className="completion-block cancelled">
                   <span className="completion-icon">{"\u2717"}</span>
                   <div className="completion-text">
-                    <strong>Auction cancelled.</strong> Not enough bidders before the deadline. All deposits are refundable.
+                    <strong>Issuance cancelled.</strong> Below minimum QIB participation before the deadline. All deposits refundable.
                   </div>
                   <button className="btn btn-primary" onClick={resetForNewAuction} disabled={!!loading}>
-                    New Auction
+                    New Issuance
                   </button>
                 </div>
               )}
