@@ -744,7 +744,7 @@ function App() {
           <>
             <div className="connect-subtitle" style={{ marginTop: 6 }}>Sealed-bid Vickrey clearing on Zama fhEVM with ERC-7984 settlement</div>
             <p style={{ maxWidth: 720, margin: "12px 0 14px", opacity: 0.85, fontSize: 13, lineHeight: 1.55 }}>
-              Public on-chain auctions leak every bid the moment a transaction hits the mempool. Institutional buyers won't reveal yield reservations into a public book — so they don't show up. VeilBid encrypts bids <strong>client-side with FHE</strong>, clears at the second-highest price (Vickrey), and exposes selective post-trade decryption to a named regulator.
+              Public on-chain auctions leak every bid the moment a transaction hits the mempool. Institutional buyers won't reveal yield reservations into a public book, so they don't show up. VeilBid encrypts bids <strong>client-side with FHE</strong>. The contract clears at the second-highest price (Vickrey). A named regulator can decrypt the winning bid post-trade.
             </p>
           </>
         )}
@@ -1009,7 +1009,7 @@ function App() {
                     }`}
                   </button>
                   <span className="action-hint">
-                    You're watching this round read-only. Connect to participate. The 5 confidential bids above were submitted by institutional QIBs — their bid prices stay encrypted on-chain forever.
+                    You're watching this round read-only. Connect to participate. The 5 confidential bids above were submitted by institutional QIBs. Their bid prices stay encrypted on-chain forever.
                   </span>
                 </div>
               )}
@@ -1136,7 +1136,7 @@ function App() {
                   <button className="btn btn-primary" onClick={resolvePass1} disabled={!!loading}>
                     Discover Highest Bid (FHE)
                   </button>
-                  <span className="action-hint">N-1 homomorphic comparisons find the maximum encrypted bid. Pass 1 of two — gas split for block-limit safety.</span>
+                  <span className="action-hint">N-1 homomorphic comparisons find the maximum encrypted bid. Pass 1 of two. Gas split for block-limit safety.</span>
                 </div>
               )}
               {connected && auctionState?.state === 2 && (

@@ -12,24 +12,24 @@ Every on-chain auction publishes bids in plaintext calldata. Competitors see you
 
 VeilBid fixes this. Bid prices are encrypted client-side using Fully Homomorphic Encryption and submitted as ciphertext. The smart contract finds the winner and settlement price by computing directly on encrypted data, without ever decrypting individual bids. The winner pays the second-highest price (Vickrey mechanism), making honest bidding the dominant strategy. Regulators get selective decryption access on demand.
 
-**27 passing tests. Deployed on Ethereum Sepolia. Confidential bid token built on OpenZeppelin's audited [ERC-7984](https://github.com/OpenZeppelin/openzeppelin-confidential-contracts) reference implementation — bidder balances stay encrypted on-chain, even across multiple auctions.**
+**27 passing tests. Deployed on Ethereum Sepolia. Confidential bid token built on OpenZeppelin's audited [ERC-7984](https://github.com/OpenZeppelin/openzeppelin-confidential-contracts) reference implementation. Bidder balances stay encrypted on-chain, even across multiple auctions.**
 
 Built on [Zama's fhEVM](https://docs.zama.org/protocol).
 
 ## About
 
-Built by **faruukku**. I watched the MakerDAO Black Thursday postmortem and couldn't shake the fact that $8.3 million vanished not because of an exploit, but because the auction was transparent by default. That's a design failure, not a security failure — and it means every on-chain auction running today has the same vulnerability baked in. I built VeilBid because I believe privacy isn't a feature you bolt on after the fact; it's infrastructure. FHE lets us keep the verifiability of public blockchains while giving bidders the confidentiality they need to bid honestly. If DeFi wants institutional capital, it needs to stop broadcasting everyone's strategy to the world.
+Built by **faruukku**. I watched the MakerDAO Black Thursday postmortem and couldn't shake the fact that $8.3 million vanished not because of an exploit, but because the auction was transparent by default. That's a design failure, not a security failure. Every on-chain auction running today has the same vulnerability baked in. I built VeilBid because privacy isn't a feature you bolt on after the fact. It's infrastructure. FHE lets us keep the verifiability of public blockchains while giving bidders the confidentiality they need to bid honestly. If DeFi wants institutional capital, it needs to stop broadcasting everyone's strategy to the world.
 
 ## What We Built
 
-VeilBid is a complete sealed-bid Vickrey auction running entirely on-chain with FHE. This is not a toy demo — it handles the full auction lifecycle:
+VeilBid is a complete sealed-bid Vickrey auction running entirely on-chain with FHE. Not a toy demo. It handles the full auction lifecycle:
 
-- **Client-side bid encryption** — TFHE WebAssembly encrypts bids in the browser. The plaintext price never touches the network.
-- **Two-pass FHE resolution with integrity proof** — A tournament bracket finds the winner and second price; settlement re-checks both against the encrypted state via `FHE.eq` (publicly decryptable). Zero individual bids revealed.
-- **Vickrey settlement** — Winner pays the second-highest price, making honest bidding incentive-compatible (mechanism design literature, since Vickrey 1961). Winner's actual bid stays encrypted forever.
-- **ERC-7984 confidential bid token** — Deposits, payouts, and refunds flow through OpenZeppelin's audited confidential token reference implementation. A bidder's cumulative auction exposure is private even across many auctions; observers see ciphertext handles, never amounts.
-- **Graduated regulator disclosure** — The market sees the settlement price. Regulators get selective access to the winning bid via on-chain authorization, replicating the disclosure regime that makes regulated TradFi sealed-bid auctions possible.
-- **Production frontend** — React app with MetaMask integration, real-time auction lifecycle, live Sepolia deployment.
+- **Client-side bid encryption.** TFHE WebAssembly encrypts bids in the browser. The plaintext price never touches the network.
+- **Two-pass FHE resolution with integrity proof.** A tournament bracket finds the winner and second price. Settlement re-checks both against the encrypted state via `FHE.eq` (publicly decryptable). Zero individual bids revealed.
+- **Vickrey settlement.** Winner pays the second-highest price, making honest bidding incentive-compatible (mechanism design literature, since Vickrey 1961). Winner's actual bid stays encrypted forever.
+- **ERC-7984 confidential bid token.** Deposits, payouts, and refunds flow through OpenZeppelin's audited confidential token reference implementation. A bidder's cumulative auction exposure is private even across many auctions. Observers see ciphertext handles, never amounts.
+- **Graduated regulator disclosure.** The market sees the settlement price. Regulators get selective access to the winning bid via on-chain authorization. Matches the disclosure regime that makes regulated TradFi sealed-bid auctions possible.
+- **Production frontend.** React app with MetaMask integration, full auction lifecycle, live Sepolia deployment.
 
 ## The Problem Is Proven
 
@@ -37,7 +37,7 @@ These aren't hypothetical risks. They've happened, they're documented, and they 
 
 ### Liquidation Auctions
 
-When lending protocols liquidate undercollateralized positions, visible bids enable collusion. On MakerDAO's Black Thursday, liquidation bots saw each other's bids and coordinated to bid $0, taking $8.3M in collateral for free. Aave, Compound, and every lending protocol with on-chain liquidation faces the same vulnerability. Confidential liquidation auctions make coordination impossible — you can't match a bid you can't see.
+When lending protocols liquidate undercollateralized positions, visible bids enable collusion. On MakerDAO's Black Thursday, liquidation bots saw each other's bids and coordinated to bid $0, taking $8.3M in collateral for free. Aave, Compound, and every lending protocol with on-chain liquidation faces the same vulnerability. Confidential liquidation auctions make coordination impossible. You can't match a bid you can't see.
 
 ### OTC Block Trades
 
@@ -45,7 +45,7 @@ A fund holds $50M in tokens. On a DEX, slippage makes execution impossible. On a
 
 ### Token Launch Price Discovery
 
-In standard IDOs, whales see retail bids in the mempool and manipulate. Early bidders reveal price information to later participants. The result is always the same: insiders extract value, retail gets worse fills. VeilBid creates a level playing field — every participant bids blindly, the clearing price reflects genuine demand.
+In standard IDOs, whales see retail bids in the mempool and manipulate. Early bidders reveal price information to later participants. The result is always the same: insiders extract value, retail gets worse fills. VeilBid creates a level playing field. Every participant bids blindly. The clearing price reflects genuine demand.
 
 ```solidity
 // Any protocol can create a confidential auction in one call
@@ -158,7 +158,7 @@ contract VeilBidUSDC is ZamaEthereumConfig, ERC7984 {
 
 **Why this matters.** Encrypting bid prices alone is insufficient. If a bidder's plaintext deposit is `maxPrice * sellAmount`, an observer can correlate addresses with auction participation across many auctions and reconstruct cumulative exposure. ERC-7984 closes that gap: deposits, payouts, and refunds all flow through encrypted balances. A bidder's lifetime VeilBid activity stays private.
 
-**Operator pattern.** Bidders authorize the auction once via `bidToken.setOperator(auction, until)`. The auction calls `confidentialTransferFrom(bidder, auction, encAmount)` to pull the deposit. There is no leaky `allowance(holder, spender)` getter — observers cannot see how much spending authority a bidder has granted.
+**Operator pattern.** Bidders authorize the auction once via `bidToken.setOperator(auction, until)`. The auction calls `confidentialTransferFrom(bidder, auction, encAmount)` to pull the deposit. There is no leaky `allowance(holder, spender)` getter. Observers cannot see how much spending authority a bidder has granted.
 
 ## What Makes This Hard
 
@@ -241,11 +241,11 @@ test/
 
 ## Testnet Deployment
 
-Live on Ethereum Sepolia with real client-side FHE encryption and ERC-7984 confidential balances. Addresses are written to `frontend/src/contracts/addresses.js` by `scripts/deploy.ts` — see that file for the current set after a fresh deploy.
+Live on Ethereum Sepolia with real client-side FHE encryption and ERC-7984 confidential balances. Addresses are written to `frontend/src/contracts/addresses.js` by `scripts/deploy.ts`. See that file for the current set after a fresh deploy.
 
 You can verify on Etherscan that bid transactions contain only encrypted bytes in calldata, and that vbUSDC balances expose only ciphertext handles, not amounts.
 
-**[Try the live frontend](https://veilbid-app.vercel.app)** — connect MetaMask on Sepolia, create an auction, and submit encrypted bids.
+**[Try the live frontend](https://veilbid-app.vercel.app)**. Connect MetaMask on Sepolia, create an auction, and submit encrypted bids.
 
 ## Privacy Model
 
@@ -281,13 +281,13 @@ Total resolve cost for 5 bidders: 1.59M gas across two transactions. Estimated p
 # Install and run tests (local Hardhat with fhEVM mock)
 npm install
 npx hardhat compile
-npx hardhat test          # 27 passing — full Vickrey + ERC-7984 lifecycle
+npx hardhat test          # 27 passing. Full Vickrey + ERC-7984 lifecycle
 
 # Deploy to Sepolia
 cp .env.example .env      # add DEPLOYER_PRIVATE_KEY
 npx hardhat run scripts/deploy.ts --network sepolia
 
-# One-command judge walkthrough — creates auction, funds 5 bidders,
+# One-command judge walkthrough. Creates auction, funds 5 bidders,
 # sets ERC-7984 operator, submits 5 encrypted bids
 npx hardhat run scripts/seed-auction.ts --network sepolia
 
