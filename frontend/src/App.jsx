@@ -196,7 +196,7 @@ function BidCards({ bidCount, auctionState }) {
           return (
             <tr key={i} className={isWinner ? "winner-row" : ""}>
               <td><span className="bid-id">{String(i + 1).padStart(2, "0")}</span></td>
-              <td>Bidder #{i + 1}</td>
+              <td>{["Pension Fund A", "Asset Manager B", "Treasury Desk C", "Insurance Co D", "Family Office E"][i] || `Bidder #${i + 1}`}</td>
               <td>
                 {isWinner
                   ? <span className="bid-amount-hidden">WINNER</span>
