@@ -16,11 +16,13 @@ import { ethers, network } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 
-const BID_PRICES = [3n, 7n, 5n, 4n, 1n]; // bidder2 wins (price=7), settlement = 5
-const SELL_AMOUNT = 10_000n;
-const MAX_PRICE = 10n;
-const RESERVE_PRICE = 2n;
-const AUCTION_DURATION = 1800; // 30 min
+// Discount-price bids per $100 face. Index 2 (frontend labels "Treasury Desk C")
+// wins at 9895; index 3 ("Insurance Co D") becomes the clearing price at 9890.
+const BID_PRICES = [9870n, 9885n, 9895n, 9890n, 9880n];
+const SELL_AMOUNT = 50_000n;       // $5M face-value lot (50,000 units of $100-face paper)
+const MAX_PRICE = 10_000n;         // ceiling = $100 par
+const RESERVE_PRICE = 9_800n;      // floor = $98.00 — issuer's max acceptable yield
+const AUCTION_DURATION = 1800;     // 30 min
 const MIN_BIDDERS = 3;
 const GAS_FUNDING = ethers.parseEther("0.003");
 
@@ -148,7 +150,7 @@ async function main() {
   console.log("\n========================================");
   console.log(`Auction #${auctionId} seeded with ${bidders.length} encrypted bids`);
   console.log("Bid prices encrypted client-side; deposits flowed through ERC-7984 (encrypted).");
-  console.log("Expected outcome: Bidder2 wins (bid=7), pays settlement price 5 (Vickrey).");
+  console.log("Expected outcome: bid index 2 wins (9895), pays settlement price 9890 (Vickrey).");
   console.log("========================================");
 }
 
