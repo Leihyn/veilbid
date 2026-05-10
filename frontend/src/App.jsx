@@ -452,7 +452,7 @@ function App() {
     const sa = Number(sellAmount), mp = Number(maxPrice), rp = Number(reservePrice), dur = Number(duration), mb = Number(minBidders);
     if (!sa || !mp || !rp || !dur || !mb) { log("Fill in all auction parameters", "error"); return; }
     if (rp > mp) { log("Reserve price cannot exceed max price", "error"); return; }
-    if (mb < 2) { log("Minimum bidders must be at least 2", "error"); return; }
+    if (mb < 3) { log("Minimum bidders must be at least 3", "error"); return; }
 
     await runAction("Creating auction...", async () => {
       const s = IS_TESTNET ? signer : localWallets.seller;

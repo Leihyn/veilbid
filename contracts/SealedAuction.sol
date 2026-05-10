@@ -102,7 +102,7 @@ contract SealedAuction is ZamaEthereumConfig {
     /// @param maxPrice Maximum bid price per unit (determines fixed deposit)
     /// @param reservePrice Minimum acceptable second price per unit
     /// @param duration Auction duration in seconds
-    /// @param minBidders Minimum number of bidders for the auction to resolve (recommend >= 3)
+    /// @param minBidders Minimum number of bidders for the auction to resolve (must be >= 3)
     function createAuction(
         MockERC20 sellToken,
         IERC7984 bidToken,
@@ -116,7 +116,7 @@ contract SealedAuction is ZamaEthereumConfig {
         require(sellAmount > 0, "SealedAuction: zero amount");
         require(maxPrice > 0, "SealedAuction: zero max price");
         require(reservePrice <= maxPrice, "SealedAuction: reserve > max");
-        require(minBidders >= 2, "SealedAuction: minBidders must be >= 2");
+        require(minBidders >= 3, "SealedAuction: minBidders must be >= 3");
 
         // ERC-7984 amounts cap at uint64 — keep fixedDeposit within range
         uint256 fixedDeposit256 = uint256(maxPrice) * uint256(sellAmount);

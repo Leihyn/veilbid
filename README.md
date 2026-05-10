@@ -2,7 +2,7 @@
 
 **Confidential auction infrastructure for on-chain finance.**
 
-**[Live Demo](https://veilbid-app.vercel.app)** | **[Sepolia Contract](https://sepolia.etherscan.io/address/0x0F4DAe0DfCCF5Ed79b63Dd662Aa25F3150f5cb75)**
+**[Live Demo](https://veilbid-app.vercel.app)** | **[Sepolia Contract](https://sepolia.etherscan.io/address/0xB622C061dc4a4d1637145604ebbaE53a77cF7D36)**
 
 ---
 
